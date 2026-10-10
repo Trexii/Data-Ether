@@ -12,9 +12,9 @@ export const generateRequestSchema = z.object({
   columns: z.array(z.string()).optional(),
   note: z.string().optional(),
   existingRows: z.array(z.record(z.string(), z.union([z.string(), z.number()]))).optional(),
-  existingRowsCount: z.number().int().min(1).max(50).optional(),
+  existingRowsCount: z.number().int().min(1).max(100).optional(),
   previousItems: z.array(z.string()).optional(),
-  targetTotal: z.number().int().min(1).max(50).optional(),
+  targetTotal: z.number().int().min(1).max(100).optional(),
 });
 
 export type GenerateRequest = z.infer<typeof generateRequestSchema>;
