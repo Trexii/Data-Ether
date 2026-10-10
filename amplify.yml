@@ -7,6 +7,7 @@ frontend:
         - npm ci --cache .npm --prefer-offline
     build:
       commands:
+        - env | grep -E '^(GEMINI_|DATABASE_|DB_|AI_|RATE_|DAILY_|CACHE_)' >> .env.production || true
         - npm run build
   artifacts:
     baseDirectory: .next
