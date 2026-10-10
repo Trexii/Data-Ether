@@ -100,10 +100,9 @@ export default function Home() {
     setIsSaved(false);
     setErrorMessage("");
 
-    // Create client abort controller with 34-second timeout budget
+    // Client abort controller (no artificial timeout limit)
     const controller = new AbortController();
     abortControllerRef.current = controller;
-    const timeoutId = setTimeout(() => controller.abort(), 34000);
 
     try {
       const res = await fetch("/api/generate", {
@@ -112,8 +111,6 @@ export default function Home() {
         body: JSON.stringify({ query: trimmedQuery }),
         signal: controller.signal,
       });
-
-      clearTimeout(timeoutId);
 
       let data: any;
       try {
@@ -139,11 +136,8 @@ export default function Home() {
         addToast("success", "Data generated");
       }
     } catch (err: unknown) {
-      clearTimeout(timeoutId);
       if (controller.signal.aborted) {
-        setErrorMessage(
-          "The AI took too long. Try again, ask for fewer rows, or click Load Saved Data."
-        );
+        setErrorMessage("Generation was cancelled.");
       } else if (err instanceof Error) {
         setErrorMessage(err.message);
       } else {

@@ -60,9 +60,9 @@ function cleanJsonText(raw: string): string {
 }
 
 /**
- * Calls Gemini API with an abort controller timeout budget.
+ * Calls Gemini API without internal timeout limits.
  */
-async function callGemini(prompt: string, modelName: string, timeoutMs: number): Promise<string> {
+async function callGemini(prompt: string, modelName: string): Promise<string> {
   const client = getGeminiClient();
   const model = client.getGenerativeModel({
     model: modelName,
@@ -73,27 +73,10 @@ async function callGemini(prompt: string, modelName: string, timeoutMs: number):
     },
   });
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const result = await model.generateContent(
-      { contents: [{ role: "user", parts: [{ text: prompt }] }] },
-      { signal: controller.signal }
-    );
-    clearTimeout(timeoutId);
-    return result.response.text();
-  } catch (err: unknown) {
-    clearTimeout(timeoutId);
-    if (controller.signal.aborted) {
-      throw new AiError(
-        "The AI took too long. Try again, ask for fewer rows, or click Load Saved Data.",
-        504,
-        "AI_TIMEOUT"
-      );
-    }
-    throw err;
-  }
+  const result = await model.generateContent({
+    contents: [{ role: "user", parts: [{ text: prompt }] }],
+  });
+  return result.response.text();
 }
 
 // Patterns that attempt to force an entity into the #1 / first rank position
@@ -137,8 +120,7 @@ export function detectAndSanitizeManipulation(rawQuery: string): {
  */
 export async function generateTableData(query: string): Promise<{ data: AIResponse; modelUsed: string }> {
   const startTime = Date.now();
-  const timeBudgetMs = parseInt(process.env.AI_TIME_BUDGET_MS || "24000", 10);
-  const primaryModel = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite";
+  const primaryModel = process.env.GEMINI_MODEL || "gemini-3.8-flash";
   const fallbackModel = process.env.GEMINI_FALLBACK_MODEL || "gemini-3.1-flash-lite";
 
   // Step 1: Detect and sanitize manipulation attempts
@@ -152,22 +134,15 @@ export async function generateTableData(query: string): Promise<{ data: AIRespon
   let currentModel = primaryModel;
   let rawText = "";
 
-  // Step 2: Call primary model with timeout budget
-  const remainingBudget = timeBudgetMs - (Date.now() - startTime) - 1000;
-  if (remainingBudget <= 0) {
-    throw new AiError("The AI took too long. Try again, ask for fewer rows, or click Load Saved Data.", 504, "AI_TIMEOUT");
-  }
-
+  // Step 2: Call primary model (no timeout limit)
   try {
-    rawText = await callGemini(userPrompt, currentModel, remainingBudget);
+    rawText = await callGemini(userPrompt, currentModel);
   } catch (err: unknown) {
-    // If primary model fails or is busy, fallback to secondary model if budget permits
-    const timeRemaining = timeBudgetMs - (Date.now() - startTime);
-    if (timeRemaining >= 6000 && err instanceof Error && !err.message.includes("AI_TIMEOUT")) {
-      console.warn(`Primary model ${primaryModel} failed. Trying fallback model ${fallbackModel}.`);
+    console.warn(`Primary model ${primaryModel} failed. Trying fallback model ${fallbackModel}.`);
+    try {
       currentModel = fallbackModel;
-      rawText = await callGemini(userPrompt, currentModel, timeRemaining - 1000);
-    } else {
+      rawText = await callGemini(userPrompt, currentModel);
+    } catch {
       if (err instanceof AiError) throw err;
       throw new AiError("The AI service is unavailable. Please try again.", 502, "AI_UNAVAILABLE");
     }
@@ -178,11 +153,10 @@ export async function generateTableData(query: string): Promise<{ data: AIRespon
   try {
     parsed = JSON.parse(cleanJsonText(rawText));
   } catch {
-    const timeRemaining = timeBudgetMs - (Date.now() - startTime);
-    if (timeRemaining >= 6000) {
-      rawText = await callGemini(userPrompt, currentModel, timeRemaining - 1000);
+    try {
+      rawText = await callGemini(userPrompt, currentModel);
       parsed = JSON.parse(cleanJsonText(rawText));
-    } else {
+    } catch {
       throw new AiError("The AI returned a malformed response.", 502, "MALFORMED_RESPONSE");
     }
   }
@@ -257,15 +231,10 @@ export async function optimizeQueryPrompt(rawQuery: string): Promise<{ alreadyOp
     },
   });
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 8000);
-
   try {
-    const result = await model.generateContent(
-      { contents: [{ role: "user", parts: [{ text: `User Query: "${trimmed}"` }] }] },
-      { signal: controller.signal }
-    );
-    clearTimeout(timeoutId);
+    const result = await model.generateContent({
+      contents: [{ role: "user", parts: [{ text: `User Query: "${trimmed}"` }] }],
+    });
 
     const parsed = JSON.parse(cleanJsonText(result.response.text()));
     const alreadyOptimized = Boolean(parsed.alreadyOptimized);
@@ -279,7 +248,6 @@ export async function optimizeQueryPrompt(rawQuery: string): Promise<{ alreadyOp
 
     return { alreadyOptimized, optimizedQuery };
   } catch (err: unknown) {
-    clearTimeout(timeoutId);
     console.warn("Failed to optimize query via AI, falling back to original query:", err);
     return { alreadyOptimized: true, optimizedQuery: trimmed };
   }
