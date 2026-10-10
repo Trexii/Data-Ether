@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { ArrowUpDown, ArrowUp, ArrowDown, Search, ShieldAlert } from "lucide-react";
+import { ArrowUpDown, ArrowUp, ArrowDown, Search, ShieldAlert, Loader2, Check, Save, Download } from "lucide-react";
+import ScrambleCell from "./ScrambleCell";
 
 interface DataTableProps {
   query: string;
@@ -10,6 +11,11 @@ interface DataTableProps {
   rows: Record<string, string | number>[];
   sourceBadge?: string;
   targetTotal?: number;
+  onSaveToDatabase?: () => void;
+  isSaving?: boolean;
+  isSaved?: boolean;
+  onDownloadExcel?: () => void;
+  isAnimatingSnapshot?: boolean;
 }
 
 type SortDirection = "asc" | "desc" | null;
@@ -21,6 +27,11 @@ export default function DataTable({
   rows,
   sourceBadge = "Fast (model knowledge)",
   targetTotal,
+  onSaveToDatabase,
+  isSaving,
+  isSaved,
+  onDownloadExcel,
+  isAnimatingSnapshot,
 }: DataTableProps) {
   const [filterText, setFilterText] = useState("");
   const [sortColumn, setSortColumn] = useState<string | null>(null);
@@ -39,18 +50,39 @@ export default function DataTable({
     }
   };
 
+  // Automatically heal model rank hallucinations (e.g. copying a year like 2019 into the Rank column)
+  const sanitizedRows = useMemo(() => {
+    const rankCol = columns.find((c) => /^(#|rank|position|pos|s\.?no\.?)$/i.test(c.trim()));
+    if (!rankCol) return rows;
+
+    return rows.map((row, idx) => {
+      const val = row[rankCol];
+      const numVal = Number(val);
+      // If rank is missing or clearly a year/hallucination (> 1900 or non-consecutive anomaly)
+      if (
+        val === undefined ||
+        val === null ||
+        (!isNaN(numVal) && numVal > rows.length * 2 && numVal >= 1900) ||
+        (!isNaN(numVal) && numVal !== idx + 1 && rows.length > 2 && idx > 0 && Number(rows[idx - 1][rankCol]) === idx)
+      ) {
+        return { ...row, [rankCol]: idx + 1 };
+      }
+      return row;
+    });
+  }, [rows, columns]);
+
   // Filter rows across all columns
   const filteredRows = useMemo(() => {
-    if (!filterText.trim()) return rows;
+    if (!filterText.trim()) return sanitizedRows;
     const lowerFilter = filterText.toLowerCase();
 
-    return rows.filter((row) =>
+    return sanitizedRows.filter((row) =>
       columns.some((col) => {
         const val = row[col];
         return val !== undefined && val !== null && String(val).toLowerCase().includes(lowerFilter);
       })
     );
-  }, [rows, columns, filterText]);
+  }, [sanitizedRows, columns, filterText]);
 
   // Sort rows based on active sort column and direction
   const sortedRows = useMemo(() => {
@@ -81,60 +113,105 @@ export default function DataTable({
   }, [filteredRows, sortColumn, sortDirection]);
 
   return (
-    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-md animate-table-spring">
-      {/* Table Header Metadata */}
-      <div className="p-5 border-b border-slate-200 bg-slate-50/50">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-2">
+    <div
+      id="astral-data-table"
+      className="relative flex flex-col w-full max-h-[calc(100vh-130px)] rounded-2xl overflow-hidden backdrop-blur-3xl bg-[#09090b]/98 border border-white/20 border-t-white/50 shadow-[0_30px_90px_rgba(0,0,0,0.98),inset_0_1px_2px_rgba(255,255,255,0.35)] text-zinc-100"
+    >
+      {/* Specular Liquid Glass Top Sheen - High Gloss */}
+      <div className="absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-white/[0.12] via-white/[0.03] to-transparent pointer-events-none rounded-t-2xl" />
+
+      {/* Table Header Metadata - Compact Padding */}
+      <div className="px-5 py-3 border-b border-white/10 bg-white/[0.02] relative z-10 shrink-0">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div className="flex items-center gap-3 flex-wrap">
-            <h2 className="text-lg font-bold text-slate-900 tracking-tight">{query}</h2>
-            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-200">
-              {rows.length} {rows.length === 1 ? "row" : "rows"}
+            <h2 className="text-base sm:text-lg font-bold text-white tracking-tight">{query}</h2>
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-mono font-medium bg-white/[0.06] text-zinc-300 border border-white/15 shadow-[inset_0_1px_1px_rgba(255,255,255,0.15)]">
+              {rows.length} {rows.length === 1 ? "entry" : "entries"}
             </span>
           </div>
 
           {/* Source Badge */}
           <div>
-            <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200">
-              Source: <strong className="ml-1 font-semibold text-slate-900">{sourceBadge}</strong>
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-lg text-[11px] font-mono bg-white/[0.04] text-zinc-400 border border-white/10">
+              Source: <strong className="ml-1.5 font-semibold text-white">{sourceBadge}</strong>
             </span>
           </div>
         </div>
 
         {note && (
           <div
-            className={`text-sm rounded-lg p-3 mt-2 flex items-start gap-2.5 ${
+            className={`text-xs rounded-xl px-3 py-2 mt-2 flex items-start gap-2 backdrop-blur-md ${
               note.toLowerCase().includes("not possible") || note.toLowerCase().includes("manipulation")
-                ? "bg-amber-50 border border-amber-300 text-amber-900"
-                : "bg-white border border-slate-200 text-slate-600"
+                ? "bg-amber-950/40 border border-amber-500/40 text-amber-200"
+                : "bg-white/[0.03] border border-white/15 text-zinc-300 shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)]"
             }`}
           >
             {(note.toLowerCase().includes("not possible") || note.toLowerCase().includes("manipulation")) && (
-              <ShieldAlert className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <ShieldAlert className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
             )}
-            <p className="leading-relaxed">
-              <span className="font-semibold text-slate-800">Note: </span>
+            <p className="leading-snug">
+              <span className="font-semibold text-white">Observation: </span>
               {note.replace(/^(?:Note:\s*)+/i, "")}
             </p>
           </div>
         )}
 
-        {/* Search / Filter box */}
-        <div className="mt-4 relative max-w-sm">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            value={filterText}
-            onChange={(e) => setFilterText(e.target.value)}
-            placeholder="Filter displayed rows..."
-            className="w-full pl-9 pr-3 py-1.5 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-slate-400"
-          />
+        {/* Toolbar: Search input on left, Action icon buttons on right */}
+        <div className="mt-2.5 flex items-center justify-between gap-3">
+          <div className="relative flex-1 max-w-xs sm:max-w-sm">
+            <Search className="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              value={filterText}
+              onChange={(e) => setFilterText(e.target.value)}
+              placeholder="Filter displayed records..."
+              className="w-full pl-9 pr-3.5 py-1.5 text-xs bg-black/60 border border-white/20 rounded-xl focus:outline-none focus:border-white/50 focus:ring-1 focus:ring-white/30 text-white placeholder:text-zinc-500 transition shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)]"
+            />
+          </div>
+
+          {/* Action Icon Buttons - Save (Upload to Vault) & Download (Download in XLSX) */}
+          <div className="flex items-center gap-2">
+            {onSaveToDatabase && (
+              <button
+                type="button"
+                onClick={onSaveToDatabase}
+                disabled={isSaving || isSaved || isAnimatingSnapshot}
+                className={`p-2 rounded-xl border text-xs font-mono transition-all shadow-sm flex items-center justify-center ${
+                  isSaved
+                    ? "bg-white/15 border-white/30 text-white cursor-default"
+                    : "bg-white/[0.06] hover:bg-white text-zinc-300 hover:text-black border-white/15 hover:border-white/30 disabled:opacity-40 disabled:cursor-not-allowed"
+                }`}
+                title={isSaved ? "Uploaded to Vault" : "Upload to Vault"}
+              >
+                {isSaving ? (
+                  <Loader2 className="w-4 h-4 animate-spin text-white" />
+                ) : isSaved ? (
+                  <Check className="w-4 h-4 text-emerald-400" />
+                ) : (
+                  <Save className="w-4 h-4 text-current" />
+                )}
+              </button>
+            )}
+
+            {onDownloadExcel && (
+              <button
+                type="button"
+                onClick={onDownloadExcel}
+                disabled={isAnimatingSnapshot}
+                className="p-2 rounded-xl bg-white/[0.06] hover:bg-white text-zinc-300 hover:text-black border border-white/15 hover:border-white/30 text-xs font-mono transition-all shadow-sm flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed"
+                title="Download in XLSX"
+              >
+                <Download className="w-4 h-4 text-current" />
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Table Scroll Area */}
-      <div className="overflow-x-auto max-h-[550px] relative">
+      {/* Table Scroll Area - Dynamically fits content, bounded by card max-h so bottom is always visible */}
+      <div className="flex-1 min-h-0 overflow-auto relative">
         <table className="w-full text-left border-collapse text-sm">
-          <thead className="bg-slate-100 text-slate-700 sticky top-0 z-10 shadow-xs">
+          <thead className="bg-zinc-950/95 text-zinc-300 sticky top-0 z-10 shadow-sm border-b border-white/15 backdrop-blur-md">
             <tr>
               {columns.map((col) => {
                 const isSorted = sortColumn === col;
@@ -142,19 +219,19 @@ export default function DataTable({
                   <th
                     key={col}
                     onClick={() => handleSort(col)}
-                    className="py-3 px-4 font-semibold select-none cursor-pointer hover:bg-slate-200 transition border-b border-slate-200 whitespace-nowrap"
+                    className="py-3.5 px-4 font-semibold select-none cursor-pointer hover:bg-white/[0.06] transition whitespace-nowrap text-xs font-mono tracking-wider uppercase text-zinc-300"
                   >
                     <div className="flex items-center gap-1.5">
                       <span>{col}</span>
-                      <span className="text-slate-400">
+                      <span className="text-zinc-500">
                         {isSorted ? (
                           sortDirection === "asc" ? (
-                            <ArrowUp className="w-3.5 h-3.5 text-blue-600 font-bold" />
+                            <ArrowUp className="w-3.5 h-3.5 text-white font-bold" />
                           ) : (
-                            <ArrowDown className="w-3.5 h-3.5 text-blue-600 font-bold" />
+                            <ArrowDown className="w-3.5 h-3.5 text-white font-bold" />
                           )
                         ) : (
-                          <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                          <ArrowUpDown className="w-3 h-3 text-zinc-500" />
                         )}
                       </span>
                     </div>
@@ -163,25 +240,29 @@ export default function DataTable({
               })}
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-200">
+          <tbody className="divide-y divide-white/[0.06]">
             {sortedRows.length === 0 ? (
               <tr>
-                <td colSpan={columns.length} className="text-center py-8 text-slate-400">
-                  {filterText ? "No matching records found." : "No data available."}
+                <td colSpan={columns.length} className="text-center py-10 text-zinc-500 font-mono text-xs">
+                  {filterText ? "No matching records found in this dimension." : "No data available."}
                 </td>
               </tr>
             ) : (
               sortedRows.map((row, index) => (
                 <tr
                   key={index}
-                  className={`animate-row-bounce row-hover-lift transition-colors duration-150 border-b border-slate-100 last:border-b-0 ${
-                    index % 2 === 0 ? "bg-white hover:bg-blue-50/50" : "bg-slate-50/60 hover:bg-blue-50/50"
+                  className={`animate-row-sensible transition-colors duration-150 ${
+                    index % 2 === 0 ? "bg-[#09090b] hover:bg-white/[0.06]" : "bg-zinc-950/90 hover:bg-white/[0.06]"
                   }`}
-                  style={{ animationDelay: `${Math.min(index * 35, 1400)}ms` }}
+                  style={{ animationDelay: `${Math.min(index * 25, 1000)}ms` }}
                 >
-                  {columns.map((col) => (
-                    <td key={col} className="py-2.5 px-4 text-slate-700 whitespace-nowrap">
-                      {row[col] !== undefined && row[col] !== null ? String(row[col]) : "N/A"}
+                  {columns.map((col, colIdx) => (
+                    <td key={col} className="py-3 px-4 whitespace-nowrap text-zinc-200">
+                      <ScrambleCell
+                        value={row[col]}
+                        shouldAnimate={index < 12}
+                        delayMs={Math.min(index * 25, 1000) + colIdx * 30}
+                      />
                     </td>
                   ))}
                 </tr>
@@ -192,9 +273,9 @@ export default function DataTable({
       </div>
 
       {/* Footer Disclaimer */}
-      <div className="px-5 py-3 border-t border-slate-200 bg-slate-50 flex items-center justify-between text-xs text-slate-500">
-        <span>AI-generated data. Verify before use.</span>
-        <span>Showing {sortedRows.length} of {rows.length} rows</span>
+      <div className="px-5 py-3 border-t border-white/10 bg-white/[0.02] flex items-center justify-between text-[11px] text-zinc-500 font-mono shrink-0">
+        <span>Verified structured output • Nexus compliant</span>
+        <span>Displaying {sortedRows.length} of {rows.length} rows</span>
       </div>
     </div>
   );

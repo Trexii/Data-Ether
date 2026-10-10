@@ -1,12 +1,16 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { Sparkles, Database, FileSpreadsheet, Search, Clock, Loader2, Check, Zap } from "lucide-react";
+import { FileSpreadsheet, Loader2, Check, ArrowLeft } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { toPng } from "html-to-image";
 import DataTable from "@/components/DataTable";
-import TableSkeleton from "@/components/TableSkeleton";
+import AstralLoadingScreen, { LoadingPhase } from "@/components/AstralLoadingScreen";
+import SnapshotFlyer from "@/components/SnapshotFlyer";
 import ErrorBanner from "@/components/ErrorBanner";
 import ToastContainer, { ToastMessage } from "@/components/Toast";
 import SavedDatasetsModal from "@/components/SavedDatasetsModal";
+import AstralStarfield from "@/components/AstralStarfield";
 import { GenerateResult } from "@/lib/schema";
 import { exportToExcel } from "@/lib/excel";
 
@@ -20,6 +24,8 @@ const EXAMPLE_QUERIES = [
 export default function Home() {
   const [query, setQuery] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingPhase, setLoadingPhase] = useState<LoadingPhase>("init");
+  const [showFlare, setShowFlare] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -29,7 +35,43 @@ export default function Home() {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [isOptimizing, setIsOptimizing] = useState(false);
 
+  // Snapshot & Warp States
+  const [shutterFlash, setShutterFlash] = useState(false);
+  const [isVaultPulsing, setIsVaultPulsing] = useState(false);
+  const [isAnimatingSnapshot, setIsAnimatingSnapshot] = useState(false);
+  const [snapshotData, setSnapshotData] = useState<{
+    type: "save" | "download";
+    imageUrl: string | null;
+    startRect: DOMRect;
+    targetRect: { x: number; y: number };
+  } | null>(null);
+  const [isWarpingBack, setIsWarpingBack] = useState(false);
+  const [isHyperspaceStreak, setIsHyperspaceStreak] = useState(false);
+  const [isReturningToChat, setIsReturningToChat] = useState(false);
+
+  const vaultBtnRef = useRef<HTMLButtonElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  // Keystroke & reactive starfield tracking
+  const [keystrokeTime, setKeystrokeTime] = useState(0);
+  const [typingSpeed, setTypingSpeed] = useState(0);
+  const keystrokesRef = useRef<number[]>([]);
+
   const abortControllerRef = useRef<AbortController | null>(null);
+  const pendingSaveRef = useRef<Promise<{ success: boolean; errorMsg?: string }> | null>(null);
+
+  const handleQueryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value.slice(0, 200);
+    setQuery(val);
+
+    // Track typing speed for reactive starfield ripples & hue shifting
+    const now = Date.now();
+    setKeystrokeTime(now);
+    keystrokesRef.current.push(now);
+    keystrokesRef.current = keystrokesRef.current.filter((t) => now - t <= 1500);
+    const speed = Math.min(keystrokesRef.current.length / 7, 1);
+    setTypingSpeed(speed);
+  };
 
   const addToast = (type: "success" | "error" | "info", message: string) => {
     const id = Date.now().toString() + Math.random().toString(36).substring(2, 5);
@@ -97,6 +139,7 @@ export default function Home() {
     }
 
     setIsLoading(true);
+    setLoadingPhase("init");
     setDataset(null);
     setIsSaved(false);
     setErrorMessage("");
@@ -106,6 +149,7 @@ export default function Home() {
 
     try {
       // Step 1: Request initial batch (columns, note, and first ~15 rows)
+      setLoadingPhase("schema");
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -125,12 +169,16 @@ export default function Home() {
       }
 
       if (data.fromDatabase) {
+        setLoadingPhase("finalizing");
+        await new Promise((resolve) => setTimeout(resolve, 420));
         setSourceBadge("Loaded from database");
         setIsSaved(true);
         setDataset(data);
         addToast("info", "Loaded from database");
         return;
       } else if (data.cached) {
+        setLoadingPhase("finalizing");
+        await new Promise((resolve) => setTimeout(resolve, 420));
         setSourceBadge("From cache");
         setDataset(data);
         addToast("success", "Data loaded (from cache)");
@@ -139,11 +187,13 @@ export default function Home() {
         setSourceBadge(data.model || "Gemini Flash");
       }
 
+      setLoadingPhase("fetching");
+
       // Step 2: If there are remaining rows, fetch continuation batch seamlessly in the background
-      // The user only sees the full table once ALL batches are finished
       let finalDataset = data;
 
       if (data.hasMore && data.rows && data.rows.length < (data.targetTotal || 25)) {
+        setLoadingPhase("continuation");
         // Extract primary names from first or second column to avoid duplicates
         const entityCol = data.columns[1] || data.columns[0];
         const previousItems = data.rows.map((r: any) => String(r[entityCol] || Object.values(r)[0]));
@@ -184,7 +234,12 @@ export default function Home() {
         }
       }
 
-      // Render the complete table and trigger spring & bounce animation
+      // Exit warp with lens-flare flash and render complete table
+      setLoadingPhase("finalizing");
+      // Allow progress bar to smoothly reach 100% and show Phase 05 synthesis
+      await new Promise((resolve) => setTimeout(resolve, 480));
+      setShowFlare(true);
+      setTimeout(() => setShowFlare(false), 450);
       setDataset(finalDataset);
       addToast("success", `Data generated (${finalDataset.rows?.length || 0} rows)`);
     } catch (err: unknown) {
@@ -200,56 +255,209 @@ export default function Home() {
     }
   };
 
+  const captureTableSnapshot = async (): Promise<string | null> => {
+    try {
+      const tableEl = document.getElementById("astral-data-table");
+      if (!tableEl) return null;
+      return await toPng(tableEl, { cacheBust: true, pixelRatio: 1 });
+    } catch (e) {
+      console.warn("Snapshot capture fallback to card:", e);
+      return null;
+    }
+  };
+
   const handleSaveToDatabase = async () => {
-    if (!dataset || isSaving || isSaved) return;
+    if (!dataset || isSaving || isSaved || isAnimatingSnapshot) return;
+
+    const prefersReducedMotion =
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     setIsSaving(true);
-    try {
-      const res = await fetch("/api/datasets", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+
+    // Fire actual database commit API and track its completion
+    const savePromise = (async () => {
+      try {
+        const res = await fetch("/api/datasets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            query: dataset.query,
+            note: dataset.note,
+            columns: dataset.columns,
+            rows: dataset.rows,
+            model: dataset.model,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          return { success: false, errorMsg: data?.error?.message || "Failed to save dataset." };
+        }
+        return { success: true };
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Connection timeout. Please retry.";
+        return { success: false, errorMsg: msg };
+      }
+    })();
+
+    pendingSaveRef.current = savePromise;
+
+    if (prefersReducedMotion) {
+      const result = await savePromise;
+      setIsSaving(false);
+      if (result.success) {
+        setIsSaved(true);
+        addToast("success", "Committed to Nexus database");
+      } else {
+        setIsSaved(false);
+        addToast("error", result.errorMsg || "Could not reach database. Please retry.");
+      }
+      return;
+    }
+
+    // Trigger Camera-Shutter Flash
+    setShutterFlash(true);
+    setTimeout(() => setShutterFlash(false), 140);
+
+    setIsAnimatingSnapshot(true);
+    const imgUrl = await captureTableSnapshot();
+    const tableEl = document.getElementById("astral-data-table");
+    const startRect = tableEl?.getBoundingClientRect() || new DOMRect(40, 140, 800, 400);
+
+    // Dynamic Target: Compute Vault Button position using getBoundingClientRect
+    const vaultRect = vaultBtnRef.current?.getBoundingClientRect();
+    const targetRect = vaultRect
+      ? { x: vaultRect.left + vaultRect.width / 2, y: vaultRect.top + vaultRect.height / 2 }
+      : { x: window.innerWidth - 110, y: 30 };
+
+    setSnapshotData({
+      type: "save",
+      imageUrl: imgUrl,
+      startRect,
+      targetRect,
+    });
+  };
+
+  const handleSaveAnimationComplete = async () => {
+    setSnapshotData(null);
+    setIsAnimatingSnapshot(false);
+
+    // Await the actual database save response
+    const saveResult = pendingSaveRef.current ? await pendingSaveRef.current : { success: false };
+    setIsSaving(false);
+
+    if (saveResult.success) {
+      // ONLY change save icon to tick if table was genuinely saved in DB!
+      setIsSaved(true);
+      setIsVaultPulsing(true);
+      setTimeout(() => setIsVaultPulsing(false), 900);
+      addToast("success", "Committed to Nexus database");
+    } else {
+      // Do NOT tick the save button on failure - leave as save icon so user can retry!
+      setIsSaved(false);
+      addToast("error", saveResult.errorMsg || "Could not reach database. Please retry.");
+    }
+  };
+
+  const handleDownloadExcel = async () => {
+    if (!dataset || isAnimatingSnapshot) return;
+
+    const prefersReducedMotion =
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    if (prefersReducedMotion) {
+      try {
+        await exportToExcel({
           query: dataset.query,
           note: dataset.note,
           columns: dataset.columns,
           rows: dataset.rows,
           model: dataset.model,
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data?.error?.message || "Failed to save dataset.");
+        });
+        addToast("success", "Excel materialized");
+      } catch {
+        addToast("error", "Failed to export Excel file");
       }
+      return;
+    }
 
-      setIsSaved(true);
-      addToast("success", "Saved to database");
-    } catch (err: unknown) {
-      if (err instanceof Error) {
-        addToast("error", err.message);
-      } else {
-        addToast("error", "Could not reach the database.");
+    // Camera-Shutter Flash
+    setShutterFlash(true);
+    setTimeout(() => setShutterFlash(false), 140);
+
+    setIsAnimatingSnapshot(true);
+    const imgUrl = await captureTableSnapshot();
+    const tableEl = document.getElementById("astral-data-table");
+    const startRect = tableEl?.getBoundingClientRect() || new DOMRect(40, 140, 800, 400);
+
+    // Target: Top-right corner as requested ("movet to top rightt not left")
+    const targetRect = { x: window.innerWidth - 35, y: 25 };
+
+    setSnapshotData({
+      type: "download",
+      imageUrl: imgUrl,
+      startRect,
+      targetRect,
+    });
+  };
+
+  const handleDownloadAnimationComplete = async () => {
+    setSnapshotData(null);
+    setIsAnimatingSnapshot(false);
+
+    // Trigger Excel download AFTER snapshot arrives at top-right destination
+    if (dataset) {
+      try {
+        await exportToExcel({
+          query: dataset.query,
+          note: dataset.note,
+          columns: dataset.columns,
+          rows: dataset.rows,
+          model: dataset.model,
+        });
+        addToast("success", "Excel materialized");
+      } catch {
+        addToast("error", "Failed to export Excel file");
       }
-    } finally {
-      setIsSaving(false);
     }
   };
 
-  const handleDownloadExcel = async () => {
-    if (!dataset) return;
-    try {
-      await exportToExcel({
-        query: dataset.query,
-        note: dataset.note,
-        columns: dataset.columns,
-        rows: dataset.rows,
-        model: dataset.model,
-      });
-      addToast("success", "Excel downloaded");
-    } catch (err) {
-      console.error(err);
-      addToast("error", "Failed to export Excel file");
+  const handleResetToChat = () => {
+    const prefersReducedMotion =
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    if (prefersReducedMotion) {
+      setDataset(null);
+      setQuery("");
+      inputRef.current?.focus();
+      return;
     }
+
+    // Cinematic Seamless Return Back to Chat:
+    // 1. Table slides down off the bottom edge
+    // 2. Background stars stream top-to-bottom (up to down)
+    // 3. Chat portal seamlessly fades into the center (no drop from top)
+    setIsReturningToChat(true);
+    setIsWarpingBack(true);
+    setIsHyperspaceStreak(true);
+
+    setTimeout(() => {
+      setDataset(null);
+      setQuery("");
+      setIsWarpingBack(false);
+
+      // Keep stars streaming down gently while chat portal seamlessly fades in
+      setTimeout(() => {
+        setIsHyperspaceStreak(false);
+      }, 350);
+
+      setTimeout(() => {
+        setIsReturningToChat(false);
+        inputRef.current?.focus();
+      }, 550);
+    }, 420);
   };
 
   const handleLoadSavedDataset = (loadedDataset: GenerateResult) => {
@@ -261,9 +469,43 @@ export default function Home() {
   };
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-8">
+    <div className="h-screen w-screen overflow-hidden relative bg-black text-slate-100 flex flex-col justify-between selection:bg-white/20 selection:text-white">
+      {/* Background 2D Starfield (twinkle, parallax drift, keystroke shockwaves, typing speed hue shift, hyperspace warp) */}
+      <AstralStarfield
+        keystrokeTime={keystrokeTime}
+        typingSpeed={typingSpeed}
+        isWarping={isLoading || isHyperspaceStreak}
+        warpDirection={isReturningToChat ? "down" : "up"}
+      />
+
       {/* Toast Notifications */}
       <ToastContainer toasts={toasts} onDismiss={removeToast} />
+
+      {/* Camera-Shutter Flash Effect */}
+      {shutterFlash && (
+        <div className="fixed inset-0 pointer-events-none z-50 bg-white animate-shutter-flash" />
+      )}
+
+      {/* Exit Lens-Flare Flash Effect */}
+      {showFlare && (
+        <div className="fixed inset-0 pointer-events-none z-50 bg-white/40 backdrop-blur-xs animate-lens-flare" />
+      )}
+
+      {/* Kinetic Snapshot Flyer (Save into Nexus or Materialize into Top-Right Browser Corner) */}
+      {snapshotData && (
+        <SnapshotFlyer
+          type={snapshotData.type}
+          imageUrl={snapshotData.imageUrl}
+          startRect={snapshotData.startRect}
+          targetRect={snapshotData.targetRect}
+          fallbackTitle={dataset?.query || "Astral Dataset"}
+          onComplete={
+            snapshotData.type === "save"
+              ? handleSaveAnimationComplete
+              : handleDownloadAnimationComplete
+          }
+        />
+      )}
 
       {/* Saved Datasets Modal */}
       <SavedDatasetsModal
@@ -274,199 +516,253 @@ export default function Home() {
         currentQuery={dataset?.query}
       />
 
-      {/* Header */}
-      <header className="mb-8 text-center sm:text-left border-b border-slate-200 pb-6">
-        <div className="flex items-center gap-3 justify-center sm:justify-start">
-          <div className="h-10 w-10 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-sm">
-            <Sparkles className="w-5 h-5" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
-              AI Data Fetch & Export Tool
-            </h1>
-            <p className="text-sm text-slate-600">
-              Query any structured dataset, view dynamic tables, export to Excel, and persist to database.
-            </p>
-          </div>
-        </div>
-      </header>
-
-      {/* Error Banner */}
-      <ErrorBanner message={errorMessage} onDismiss={() => setErrorMessage("")} />
-
-      {/* Request Area */}
-      <section className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm mb-6">
-        <form onSubmit={handleGenerate} className="space-y-4">
-          <div>
-            <div className="flex justify-between items-center mb-1.5">
-              <label htmlFor="query-input" className="block text-sm font-semibold text-slate-700">
-                What data do you want to generate?
-              </label>
-              <span className={`text-xs ${query.length > 180 ? "text-amber-600 font-semibold" : "text-slate-400"}`}>
-                {query.length} / 200
-              </span>
-            </div>
-            <div className="relative flex items-center">
-              <input
-                id="query-input"
-                type="text"
-                value={query}
-                onChange={(e) => setQuery(e.target.value.slice(0, 200))}
-                placeholder="e.g. Fortune 500 Top 20"
-                className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 placeholder-slate-400 text-sm sm:text-base transition"
-                disabled={isLoading}
-              />
-            </div>
-          </div>
-
-          {/* Example Chips & Generate Button */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs font-medium text-slate-500">Examples:</span>
-              {EXAMPLE_QUERIES.map((example) => (
-                <button
-                  key={example}
-                  type="button"
-                  onClick={() => handleSelectExample(example)}
-                  disabled={isLoading}
-                  className="text-xs px-2.5 py-1 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 transition font-medium border border-slate-200"
-                >
-                  {example}
-                </button>
-              ))}
-            </div>
-
-            <div className="flex flex-wrap sm:flex-nowrap items-center gap-2.5 shrink-0">
-              <button
-                type="button"
-                onClick={handleOptimizeQuery}
-                disabled={isLoading || isOptimizing || !query.trim()}
-                title="Optimize question to speed up search"
-                className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-amber-50 hover:bg-amber-100 disabled:bg-slate-100 disabled:text-slate-400 disabled:border-slate-200 text-amber-900 border border-amber-300 text-sm font-semibold rounded-lg shadow-xs transition"
-              >
-                {isOptimizing ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin text-amber-700" />
-                    <span>Optimizing...</span>
-                  </>
-                ) : (
-                  <>
-                    <Zap className="w-4 h-4 text-amber-600 fill-amber-500" />
-                    <span>Optimize Question</span>
-                  </>
-                )}
-              </button>
-
-              <button
-                type="submit"
-                disabled={isLoading || isOptimizing || !query.trim()}
-                className="inline-flex items-center justify-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg shadow-sm transition"
-              >
-                {isLoading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Generating...</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-4 h-4" />
-                    <span>Generate Data</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </form>
-      </section>
-
-      {/* Action Bar */}
-      <section className="flex flex-wrap items-center justify-between gap-3 mb-6 bg-slate-100/70 p-3 rounded-lg border border-slate-200">
-        <div className="flex items-center gap-2">
-          {dataset ? (
-            <>
-              <button
-                type="button"
-                onClick={handleSaveToDatabase}
-                disabled={isLoading || isSaving || isSaved}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 border text-xs font-semibold rounded shadow-xs transition ${
-                  isSaved
-                    ? "bg-emerald-50 border-emerald-200 text-emerald-700 cursor-default"
-                    : "bg-white border-slate-300 text-slate-700 hover:bg-slate-50 disabled:text-slate-400 disabled:bg-white disabled:cursor-not-allowed"
-                }`}
-              >
-                {isSaving ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />
-                    <span>Saving...</span>
-                  </>
-                ) : isSaved ? (
-                  <>
-                    <Check className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Saved to Database</span>
-                  </>
-                ) : (
-                  <>
-                    <Database className="w-3.5 h-3.5 text-blue-600" />
-                    <span>Save to Database</span>
-                  </>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={handleDownloadExcel}
-                disabled={isLoading}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-300 text-slate-700 text-xs font-semibold rounded shadow-xs hover:bg-slate-50 transition"
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Download Excel</span>
-              </button>
-            </>
-          ) : (
-            <span className="text-xs text-slate-400 font-medium italic">
-              Generate data below to export or save
-            </span>
-          )}
-        </div>
-
-        <div>
+      {/* Top Astral Header Bar - Stealth & Cold Glass */}
+      <header className="relative z-20 w-full px-6 py-4 flex items-center justify-between shrink-0">
+        {dataset ? (
           <button
             type="button"
-            onClick={() => setIsModalOpen(true)}
-            disabled={isLoading}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 text-xs font-semibold rounded shadow-xs transition disabled:opacity-50"
+            onClick={handleResetToChat}
+            disabled={isLoading || isAnimatingSnapshot || isWarpingBack}
+            className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/[0.06] hover:bg-white/15 border border-white/20 text-xs font-mono font-semibold tracking-wider text-zinc-300 hover:text-white transition group backdrop-blur-md shadow-sm"
           >
-            <Clock className="w-3.5 h-3.5 text-slate-500" />
-            <span>Load Saved Data</span>
+            <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform text-white" />
+            <span>RETURN TO CHAT</span>
           </button>
-        </div>
-      </section>
-
-      {/* Main Content Area */}
-      {isLoading ? (
-        <TableSkeleton />
-      ) : dataset ? (
-        <DataTable
-          key={`${dataset.query}-${dataset.rows.length}`}
-          query={dataset.query}
-          note={dataset.note}
-          columns={dataset.columns}
-          rows={dataset.rows}
-          sourceBadge={sourceBadge}
-          targetTotal={dataset.targetTotal}
-        />
-      ) : (
-        <main className="bg-white border border-slate-200 rounded-xl p-12 text-center shadow-sm">
-          <div className="mx-auto w-12 h-12 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 mb-3">
-            <Search className="w-6 h-6" />
+        ) : (
+          <div className="flex items-center gap-2.5">
+            <div className="w-2 h-2 rounded-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.7)]" />
+            <span className="text-xs font-mono tracking-[0.25em] uppercase font-bold text-white flex items-center gap-1.5">
+              <span className="text-zinc-500 font-normal">[</span>
+              <span className="text-white font-extrabold">DATA ETHER</span>
+              <span className="text-zinc-500 font-normal">]</span>
+            </span>
           </div>
-          <h3 className="text-base font-semibold text-slate-800 mb-1">
-            No data generated yet
-          </h3>
-          <p className="text-sm text-slate-500 max-w-md mx-auto">
-            Type a request above like &quot;Fortune 500 Top 20&quot; or choose an example chip, then click <strong>Generate Data</strong>.
-          </p>
-        </main>
+        )}
+
+        {/* Glossy Glass Vault Button with Custom Safe Dial Icon */}
+        <button
+          ref={vaultBtnRef}
+          type="button"
+          onClick={() => setIsModalOpen(true)}
+          className={`flex items-center gap-2.5 px-3.5 py-1.5 rounded-xl backdrop-blur-2xl bg-white/[0.05] hover:bg-white/[0.1] border border-white/15 border-t-white/30 text-zinc-300 hover:text-white transition-all duration-200 text-xs font-mono tracking-wider shadow-[inset_0_1px_1px_rgba(255,255,255,0.2),0_8px_20px_rgba(0,0,0,0.5)] ${
+            isVaultPulsing
+              ? "border-white ring-2 ring-white/30 scale-105 shadow-[0_0_25px_rgba(255,255,255,0.35)] text-white"
+              : ""
+          }`}
+          title="Open Saved Datasets Vault"
+        >
+          <svg className="w-3.5 h-3.5 text-zinc-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="4" />
+            <circle cx="12" cy="12" r="3.5" />
+            <path d="M12 8.5v1M12 14.5v1M8.5 12h1M14.5 12h1" />
+          </svg>
+          <span className="hidden sm:inline font-semibold">VAULT</span>
+        </button>
+      </header>
+
+      {/* Main Container - Always Centered Vertically in Middle of Viewport */}
+      <main className={`relative z-10 flex-1 flex flex-col items-center justify-center mx-auto w-full min-h-0 px-4 py-2 overflow-hidden ${
+        dataset ? "max-w-[96vw] xl:max-w-[1650px]" : "max-w-6xl"
+      }`}>
+        {/* Error Banner */}
+        <ErrorBanner message={errorMessage} onDismiss={() => setErrorMessage("")} />
+
+        {/* Multi-Stage Choreographed Transitions */}
+        <AnimatePresence mode="wait">
+          {/* Stage 1: The Galactic Portal (The Chat Stage) */}
+          {!dataset && !isLoading && (
+            <motion.div
+              key="chat-portal"
+              initial={{
+                scale: 0.98,
+                opacity: 0,
+                y: 0,
+                filter: isReturningToChat ? "blur(8px)" : "blur(0px)",
+              }}
+              animate={{
+                scale: 1,
+                opacity: 1,
+                y: 0,
+                filter: "blur(0px)",
+              }}
+              exit={{
+                y: -750,
+                opacity: 0,
+                filter: "blur(12px)",
+                transition: { duration: 0.52, ease: [0.65, 0, 0.35, 1] },
+              }}
+              transition={{ duration: 0.52, ease: [0.16, 1, 0.3, 1] }}
+              className="w-full max-w-2xl mx-auto flex flex-col items-center justify-center my-auto transition-all duration-300 relative"
+            >
+              {/* Cinematic Editorial Light Leaks & Glares (Reflecting off liquid glass backdrop) */}
+              <div className="absolute -top-24 right-4 w-72 h-72 rounded-full bg-gradient-to-br from-amber-500/18 via-orange-500/8 to-transparent blur-[80px] pointer-events-none transform -rotate-12" />
+              <div className="absolute -bottom-20 left-4 w-80 h-80 rounded-full bg-gradient-to-tr from-cyan-500/14 via-indigo-500/6 to-transparent blur-[85px] pointer-events-none" />
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-36 bg-gradient-to-r from-transparent via-white/[0.04] to-transparent blur-3xl pointer-events-none transform -rotate-3" />
+
+              {/* Phonk / Dark Astral Monolithic Typographic Headline */}
+              <div className="text-center mb-8 space-y-3 relative z-10">
+                <div className="inline-flex items-center gap-2.5 px-4 py-1.5 rounded-full backdrop-blur-2xl bg-white/[0.06] border border-white/20 border-t-white/35 shadow-[inset_0_1px_1px_rgba(255,255,255,0.3),0_8px_25px_rgba(0,0,0,0.6)] text-xs font-mono uppercase tracking-[0.25em] text-zinc-300">
+                  <span className="w-1.5 h-1.5 rounded-full bg-white shadow-[0_0_8px_#fff]" />
+                  AUTONOMOUS DATA PROTOCOL
+                </div>
+                <h1 className="text-5xl sm:text-7xl font-black tracking-tight text-white uppercase drop-shadow-[0_20px_50px_rgba(0,0,0,0.95)]">
+                  DATA ETHER
+                </h1>
+                <p className="text-xs sm:text-sm font-mono uppercase tracking-[0.2em] text-zinc-400 max-w-lg mx-auto">
+                  EXTRACT STRUCTURED TABULAR INTELLIGENCE FROM THE VOID
+                </p>
+              </div>
+
+              {/* Liquid Glossy Glassmorphism Input Bar */}
+              <form onSubmit={handleGenerate} className="w-full relative z-10">
+                <div className="relative group w-full rounded-2xl backdrop-blur-2xl bg-white/[0.05] border border-white/20 border-t-white/40 border-l-white/25 focus-within:border-white/50 focus-within:ring-1 focus-within:ring-white/30 shadow-[inset_0_1px_1px_rgba(255,255,255,0.35),inset_0_0_20px_rgba(255,255,255,0.02),0_20px_50px_rgba(0,0,0,0.85)] transition-all duration-300 overflow-hidden">
+                  {/* Liquid Glass Specular Top Sheen */}
+                  <div className="absolute inset-x-0 top-0 h-[45%] bg-gradient-to-b from-white/[0.1] to-transparent pointer-events-none rounded-t-2xl" />
+
+                  <input
+                    ref={inputRef}
+                    id="query-input"
+                    type="text"
+                    value={query}
+                    onChange={handleQueryChange}
+                    placeholder="Enter data query (e.g. Fortune 500 Top 20)..."
+                    disabled={isLoading}
+                    autoComplete="off"
+                    className="w-full pl-5 pr-24 py-3.5 sm:py-4 bg-transparent text-white placeholder-zinc-500 font-sans text-sm sm:text-base outline-none transition relative z-10"
+                  />
+
+                  {/* Editorial Action Controls */}
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2 z-20">
+                    {/* Optimize Question Button: Editorial Asterisk Glyph */}
+                    <button
+                      type="button"
+                      onClick={handleOptimizeQuery}
+                      disabled={isLoading || isOptimizing || !query.trim()}
+                      title="Optimize question"
+                      className="p-2 rounded-xl backdrop-blur-md bg-white/[0.07] hover:bg-white/[0.15] border border-white/15 hover:border-white/30 text-zinc-300 hover:text-white transition disabled:opacity-30 shadow-[inset_0_1px_1px_rgba(255,255,255,0.2)]"
+                    >
+                      {isOptimizing ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
+                      ) : (
+                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                          <path d="M12 2v20M2 12h20M4.93 4.93l14.14 14.14M4.93 19.07l14.14-14.14" />
+                        </svg>
+                      )}
+                    </button>
+
+                    {/* High-End Circular Action Button (Matching Reference Image) */}
+                    <button
+                      type="submit"
+                      disabled={isLoading || isOptimizing || !query.trim()}
+                      title="Generate data"
+                      className="w-8 h-8 rounded-full flex items-center justify-center bg-white text-black hover:bg-zinc-200 transition-all duration-200 shadow-[0_0_15px_rgba(255,255,255,0.35)] active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed group/btn font-bold"
+                    >
+                      <svg className="w-4 h-4 stroke-[2.5] transform transition-transform group-hover/btn:translate-x-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="5" y1="12" x2="19" y2="12" />
+                        <polyline points="12 5 19 12 12 19" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Character Count */}
+                <div className="flex justify-end mt-2 px-2">
+                  <span className={`text-[11px] font-mono ${query.length > 180 ? "text-amber-400" : "text-zinc-500"}`}>
+                    {query.length} / 200
+                  </span>
+                </div>
+              </form>
+
+              {/* Quick Example Chips - Glossy Glassmorphism Padded Cards */}
+              <div className="flex flex-wrap items-center justify-center gap-2.5 mt-6 max-w-xl mx-auto relative z-10">
+                {EXAMPLE_QUERIES.map((example) => (
+                  <button
+                    key={example}
+                    type="button"
+                    onClick={() => handleSelectExample(example)}
+                    disabled={isLoading}
+                    className="px-4 py-2 rounded-xl backdrop-blur-2xl bg-white/[0.04] hover:bg-white/[0.1] border border-white/15 border-t-white/25 hover:border-white/35 text-xs font-mono text-zinc-300 hover:text-white transition-all duration-200 shadow-[inset_0_1px_1px_rgba(255,255,255,0.18),0_6px_18px_rgba(0,0,0,0.5)]"
+                  >
+                    {example}
+                  </button>
+                ))}
+              </div>
+            </motion.div>
+          )}
+
+          {/* Loading State: Appears from below and stops at the center */}
+          {isLoading && (
+            <motion.div
+              key="loading-screen"
+              initial={{ y: 550, opacity: 0, scale: 0.96 }}
+              animate={{ y: 0, opacity: 1, scale: 1 }}
+              exit={{
+                y: -650,
+                opacity: 0,
+                filter: "blur(10px)",
+                transition: { duration: 0.48, ease: [0.65, 0, 0.35, 1] },
+              }}
+              transition={{ duration: 0.58, ease: [0.16, 1, 0.3, 1] }}
+              className="w-full max-w-2xl mx-auto my-auto"
+            >
+              <AstralLoadingScreen query={query} phase={loadingPhase} />
+            </motion.div>
+          )}
+
+          {/* Stage 3: Table Arrival State - Rises seamlessly from below into the middle */}
+          {dataset && !isLoading && (
+            <motion.div
+              key="table-arrival"
+              initial={{ y: 550, opacity: 0, scale: 0.98 }}
+              animate={
+                isWarpingBack
+                  ? {
+                      y: 850,
+                      scale: 0.94,
+                      filter: "blur(14px)",
+                      opacity: 0,
+                    }
+                  : {
+                      scale: 1,
+                      filter: "blur(0px)",
+                      opacity: 1,
+                      y: 0,
+                    }
+              }
+              exit={{
+                opacity: 0,
+                y: 850,
+                filter: "blur(14px)",
+                transition: { duration: 0.44, ease: [0.65, 0, 0.35, 1] },
+              }}
+              transition={{ duration: 0.52, ease: [0.16, 1, 0.3, 1] }}
+              className="w-full my-auto flex flex-col"
+            >
+            <DataTable
+              key={`${dataset.query}-${dataset.rows.length}`}
+              query={dataset.query}
+              note={dataset.note}
+              columns={dataset.columns}
+              rows={dataset.rows}
+              sourceBadge={sourceBadge}
+              targetTotal={dataset.targetTotal}
+              onSaveToDatabase={handleSaveToDatabase}
+              isSaving={isSaving}
+              isSaved={isSaved}
+              onDownloadExcel={handleDownloadExcel}
+              isAnimatingSnapshot={isAnimatingSnapshot}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </main>
+
+      {/* Minimal Astral Footer - Only on Chat / Search stage to keep table view strictly non-scrollable */}
+      {!dataset && (
+        <footer className="relative z-20 w-full px-6 py-4 flex items-center justify-between text-[11px] text-slate-500 font-mono shrink-0">
+          <span>AI-POWERED TABULAR EXTRACTION</span>
+          <span>ASTRAL EDITION</span>
+        </footer>
       )}
     </div>
   );

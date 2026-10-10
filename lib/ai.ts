@@ -12,7 +12,8 @@ Rules:
 1. If the request can reasonably be represented as a table, set status to "ok". Only set status to "error" if the prompt is a conversational greeting or gibberish.
 2. columns: 4 to 8 short, human-readable column names matching the requested domain.
    - For corporate/company rankings (e.g. "Fortune 500 Top 20", "biggest companies", "banks"): you MUST strictly include these standard fields: "Rank", "Company", "Industry", "Headquarters", "Revenue (USD billions)", and "CEO".
-   - For other entity requests (sports, countries, universities): select relevant, informative attributes (e.g. Rank, Name, Key Metric with unit in parentheses, Location, etc.). Put Rank first when the data is a ranking.
+   - For other entity requests (sports, countries, universities, models, cars): select relevant, informative attributes (e.g. Rank, Name, Key Metric with unit in parentheses, Location, etc.). Put Rank first when the data is a ranking.
+   - If a 'Rank' or '#' column is present, its values MUST be strict sequential positive integers starting from 1 (1, 2, 3, 4, 5, ...). NEVER put a year (e.g. 2019), date, or model name into the Rank column.
 3. targetTotal: determine the target number of rows requested (e.g. if request says "Top 5 ...", targetTotal is 5; if "Top 20", targetTotal is 20; if unspecified, choose 20). Cap at 50.
 4. rows: generate the FIRST BATCH of up to 15 rows (or all rows if targetTotal <= 15). Every row must contain exactly the keys listed in columns, spelled identically.
 5. hasMore: set to true if targetTotal > rows.length, otherwise false.
@@ -33,7 +34,7 @@ Rules:
 1. Every row MUST contain exactly the keys in the provided columns, spelled identically.
 2. Values are strings or numbers without currency symbols.
 3. Do NOT repeat any entities that were already generated in previous items.
-4. Continue rankings sequentially matching the requested target count.`;
+4. Continue rankings sequentially matching the requested target count (e.g. #16, #17, #18...). The Rank column must be strictly consecutive integers.`;
 
 export class AiError extends Error {
   statusCode: number;
@@ -172,6 +173,44 @@ export function detectAndSanitizeManipulation(rawQuery: string): {
 }
 
 /**
+ * Automatically sanitizes rows to fix model rank hallucinations (e.g. copying a year like 2019 into the Rank column).
+ */
+export function sanitizeTableRows(
+  columns: string[],
+  rows: Record<string, string | number>[],
+  startRank: number = 1
+): Record<string, string | number>[] {
+  if (!rows || rows.length === 0) return rows;
+
+  const rankCol = columns.find((col) =>
+    /^(#|rank|position|pos|s\.?no\.?)$/i.test(col.trim())
+  );
+
+  if (!rankCol) return rows;
+
+  return rows.map((row, index) => {
+    const expectedRank = startRank + index;
+    const currentVal = row[rankCol];
+
+    // If currentVal is missing, or not equal to expectedRank and is a number or year string
+    if (
+      currentVal !== expectedRank &&
+      (typeof currentVal === "number" ||
+        !isNaN(Number(currentVal)) ||
+        currentVal === undefined ||
+        currentVal === null)
+    ) {
+      return {
+        ...row,
+        [rankCol]: expectedRank,
+      };
+    }
+
+    return row;
+  });
+}
+
+/**
  * Generates initial table structure (columns, note, first batch) in < 2s.
  */
 export async function generateInitialTableData(query: string): Promise<{ data: AIResponse; modelUsed: string }> {
@@ -191,6 +230,10 @@ export async function generateInitialTableData(query: string): Promise<{ data: A
   // Enforce reasonable bounds
   data.columns = data.columns.slice(0, 10);
   data.rows = data.rows.slice(0, 15);
+  
+  // Sanitize rank column to prevent hallucinated years or out-of-order ranks
+  data.rows = sanitizeTableRows(data.columns, data.rows, 1);
+
   const targetTotal = Math.min(Math.max(data.targetTotal || 25, data.rows.length), 50);
   data.targetTotal = targetTotal;
   data.hasMore = data.rows.length < targetTotal;
@@ -223,7 +266,11 @@ Existing entries already shown (DO NOT repeat): ${JSON.stringify(previousItems.s
 Task: Generate entries from #${existingRowsCount + 1} up to #${targetTotal}. Every row must contain exactly the keys listed in columns, spelled identically.`;
 
   const { data, modelUsed } = await invokeGeminiWithFallback(prompt, CONTINUATION_SYSTEM_INSTRUCTION, aiContinuationSchema);
-  return { rows: data.rows, modelUsed };
+  
+  // Sanitize continuation batch ranks starting from existing count + 1
+  const sanitizedRows = sanitizeTableRows(columns, data.rows, existingRowsCount + 1);
+
+  return { rows: sanitizedRows, modelUsed };
 }
 
 /**

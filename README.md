@@ -6,16 +6,18 @@ A production-ready full-stack web application that transforms arbitrary text req
 
 ## 1. Overview & Core Features
 
-- **Dynamic Schema Generation:** Works for **any** domain or query (e.g. *Fortune 500 Top 20*, *Top 30 cricketers in the world*, *5 biggest banks in India*). The AI dynamically derives the optimal columns and rows.
-- **Voice Microphone Input:** Native browser speech-to-text integration (`SpeechRecognition`) enabling hands-free voice querying with real-time feedback and active listening indicators.
-- **Search Speed Optimizer:** Dedicated "Optimize Question" button that transforms wordy, conversational prompts into concise, high-speed queries. If the query is already concise, it alerts the user and keeps the input intact.
-- **Anti-Manipulation & Ranking Integrity:** Defense-in-depth shield that rejects arbitrary position manipulation (e.g. *"This object should be on the first"* or *"Put X at #1"*). The system strips manipulative instructions, preserves factual data integrity, and states in the note that custom rank manipulation is not possible.
-- **Progressive Two-Phase Generation (AWS Timeout Bypass):** Permanently bypasses AWS Amplify's 30-second gateway timeout by dividing generation into two rapid API calls. Call 1 delivers the table schema and initial rows in < 2 seconds; Call 2 seamlessly streams remaining rows in the background.
-- **Seamless Animated Row Cascade:** Newly delivered rows animate onto the screen with staggered transitions (`animate-row-fade`) while animated skeleton shimmer rows indicate live generation.
-- **Client-Side Excel Export:** Instant `.xlsx` generation using `ExcelJS` in the browser with frozen header rows, auto-filters, column auto-sizing, and an auxiliary metadata sheet. Zero server load for file conversion.
-- **PostgreSQL Persistence:** Complete datasets stored as flexible JSONB structures with zero ORM overhead via parameterized SQL on Amazon RDS.
-- **AI-Free Retrieval:** "Load Saved Data" retrieves directly from PostgreSQL, strictly bypassing the AI API to protect quota and ensure deterministic retrieval.
-- **Quota & Cost Protection:** PostgreSQL-backed generation cache with 6-hour TTL, per-IP rate limiting (5 req/min), and a global daily AI usage cap (150 calls/day).
+- **Astral Cinematic Single-Page Experience:** Spacious, near-black navy/violet cosmos design with 60fps negative space and zero screen clutter. Only ONE primary element is present on screen at any given time.
+- **Phase 1 (The Galactic Portal):** 2D canvas starfield with 220 stars across 3 depth layers. Keystrokes generate shockwaves and shift star hue from violet to cyan to cosmic gold based on typing speed. Centered floating glass bar with native microphone speech-to-text (`SpeechRecognition`), "Optimize Question" button, and saved vault icon button.
+- **Phase 2 (The Quantum Distortion):** Generic loading experience triggered upon submission. Stars streak outward in hyperspace warp mode while a 3D holographic wireframe gyroscope rotates with light trails. Status lines smoothly cycle every 1.8s.
+- **Phase 3 (Holographic Synthesis):** Sensible table arrival (fade & rise without jarring overshoot). Header appears first, followed by staggered rows (~25ms). Cell text writes in with a matrix scramble effect (`ScrambleCell`) on the first 12 rows, locking to crisp, selectable DOM text.
+- **Phase 4 (Kinetic Capture & Snapshot Flight):** Camera shutter flash triggers on export/save. The entire table collapses into a floating blueprint snapshot card (`html-to-image`) and arcs along a curved trajectory:
+  - *Save to Nexus:* Flies into the database vault icon, causing it to pulse with an energy ring.
+  - *Materialize Spreadsheet:* Arcs directly to the top-right corner where native browser downloads land, synchronized with ExcelJS export.
+- **Phase 5 (The Event Horizon):** Reset button violently stretches the table along the Z axis into a central point of light, triggering a brief star-warp streak before the central glass input expands back into place and auto-focuses.
+- **Anti-Manipulation & Ranking Integrity:** Defense-in-depth shield rejecting arbitrary positional bias, preserving authentic factual rankings with an alert observation banner.
+- **Two-Phase Generation (AWS Amplify 30s Timeout Bypass):** Calls are divided into rapid micro-batches in the background to completely prevent gateway timeouts, while keeping the client loading state active until all rows are assembled.
+- **Accessibility & Reduced Motion:** Respects `prefers-reduced-motion` across all animations (disables flying snapshots, scrambles, and warps in favor of clean fades).
+- **PostgreSQL Persistence & Excel Export:** Full JSONB storage with instant browser-side `.xlsx` generation.
 
 ---
 

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateRequestSchema } from "@/lib/schema";
-import { generateInitialTableData, generateContinuationRows, AiError } from "@/lib/ai";
+import { generateInitialTableData, generateContinuationRows, sanitizeTableRows, AiError } from "@/lib/ai";
 import { checkIpRateLimit, checkDailyAiCap } from "@/lib/rateLimit";
 import { getCachedGeneration, setCachedGeneration, normalizeCacheKey } from "@/lib/cache";
 import { query } from "@/lib/db";
@@ -90,11 +90,15 @@ export async function POST(req: NextRequest) {
 
       if (savedResult.rows.length > 0) {
         const row = savedResult.rows[0];
+        const parsedCols = typeof row.columns === "string" ? JSON.parse(row.columns) : row.columns;
+        const parsedRows = typeof row.rows === "string" ? JSON.parse(row.rows) : row.rows;
+        const cleanRows = sanitizeTableRows(parsedCols, parsedRows);
+
         return NextResponse.json({
           query: row.query,
           note: row.note,
-          columns: typeof row.columns === "string" ? JSON.parse(row.columns) : row.columns,
-          rows: typeof row.rows === "string" ? JSON.parse(row.rows) : row.rows,
+          columns: parsedCols,
+          rows: cleanRows,
           model: row.model,
           cached: true,
           fromDatabase: true,
@@ -129,6 +133,7 @@ export async function POST(req: NextRequest) {
     if (cachedResult) {
       return NextResponse.json({
         ...cachedResult,
+        rows: sanitizeTableRows(cachedResult.columns, cachedResult.rows),
         hasMore: false,
       });
     }
