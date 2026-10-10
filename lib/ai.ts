@@ -137,8 +137,8 @@ export function detectAndSanitizeManipulation(rawQuery: string): {
  */
 export async function generateTableData(query: string): Promise<{ data: AIResponse; modelUsed: string }> {
   const startTime = Date.now();
-  const timeBudgetMs = parseInt(process.env.AI_TIME_BUDGET_MS || "30000", 10);
-  const primaryModel = process.env.GEMINI_MODEL || "gemini-3.8-flash";
+  const timeBudgetMs = parseInt(process.env.AI_TIME_BUDGET_MS || "24000", 10);
+  const primaryModel = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite";
   const fallbackModel = process.env.GEMINI_FALLBACK_MODEL || "gemini-3.1-flash-lite";
 
   // Step 1: Detect and sanitize manipulation attempts

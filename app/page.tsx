@@ -135,7 +135,7 @@ export default function Home() {
         setSourceBadge("From cache");
         addToast("success", "Data generated (from cache)");
       } else {
-        setSourceBadge("Gemini 3.5 Flash");
+        setSourceBadge(data.model || "Gemini Flash");
         addToast("success", "Data generated");
       }
     } catch (err: unknown) {
