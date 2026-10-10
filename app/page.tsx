@@ -28,7 +28,6 @@ export default function Home() {
   const [sourceBadge, setSourceBadge] = useState<string>("AI Generation");
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [isOptimizing, setIsOptimizing] = useState(false);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
 
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -90,7 +89,7 @@ export default function Home() {
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmedQuery = query.trim();
-    if (!trimmedQuery || isLoading || isLoadingMore) return;
+    if (!trimmedQuery || isLoading) return;
 
     if (trimmedQuery.length < 3) {
       setErrorMessage("Please enter at least 3 characters.");
@@ -98,7 +97,7 @@ export default function Home() {
     }
 
     setIsLoading(true);
-    setIsLoadingMore(false);
+    setDataset(null);
     setIsSaved(false);
     setErrorMessage("");
 
@@ -106,7 +105,7 @@ export default function Home() {
     abortControllerRef.current = controller;
 
     try {
-      // Step 1: Request initial batch (columns, note, and first ~10 rows in < 2s)
+      // Step 1: Request initial batch (columns, note, and first ~15 rows)
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -125,27 +124,26 @@ export default function Home() {
         throw new Error(data?.error?.message || "Failed to generate data.");
       }
 
-      setDataset(data);
-      setIsLoading(false); // Render table shell and initial rows immediately!
-
       if (data.fromDatabase) {
         setSourceBadge("Loaded from database");
         setIsSaved(true);
+        setDataset(data);
         addToast("info", "Loaded from database");
         return;
       } else if (data.cached) {
         setSourceBadge("From cache");
+        setDataset(data);
         addToast("success", "Data loaded (from cache)");
         return;
       } else {
         setSourceBadge(data.model || "Gemini Flash");
       }
 
-      // Step 2: If there are remaining rows, fetch continuation batch seamlessly
-      if (data.hasMore && data.rows && data.rows.length < (data.targetTotal || 25)) {
-        setIsLoadingMore(true);
-        addToast("info", `First ${data.rows.length} rows loaded. Generating remaining entries...`);
+      // Step 2: If there are remaining rows, fetch continuation batch seamlessly in the background
+      // The user only sees the full table once ALL batches are finished
+      let finalDataset = data;
 
+      if (data.hasMore && data.rows && data.rows.length < (data.targetTotal || 25)) {
         // Extract primary names from first or second column to avoid duplicates
         const entityCol = data.columns[1] || data.columns[0];
         const previousItems = data.rows.map((r: any) => String(r[entityCol] || Object.values(r)[0]));
@@ -170,26 +168,25 @@ export default function Home() {
           if (res2.ok) {
             const contData = await res2.json();
             if (contData.rows && contData.rows.length > 0) {
-              setDataset((prev) => {
-                if (!prev) return prev;
-                return {
-                  ...prev,
-                  rows: [...prev.rows, ...contData.rows],
-                  hasMore: false,
-                };
-              });
-              addToast("success", `Table complete (${data.rows.length + contData.rows.length} rows)`);
+              finalDataset = {
+                ...data,
+                rows: [...data.rows, ...contData.rows],
+                hasMore: false,
+              };
             }
           }
         } catch (contErr) {
-          console.warn("Continuation batch failed:", contErr);
-          // Initial rows remain available even if continuation fails
-        } finally {
-          setIsLoadingMore(false);
+          console.warn("Continuation batch failed, using initial batch:", contErr);
+          finalDataset = {
+            ...data,
+            hasMore: false,
+          };
         }
-      } else {
-        addToast("success", "Data generated");
       }
+
+      // Render the complete table and trigger spring & bounce animation
+      setDataset(finalDataset);
+      addToast("success", `Data generated (${finalDataset.rows?.length || 0} rows)`);
     } catch (err: unknown) {
       if (controller.signal.aborted) {
         setErrorMessage("Generation was cancelled.");
@@ -385,43 +382,51 @@ export default function Home() {
       {/* Action Bar */}
       <section className="flex flex-wrap items-center justify-between gap-3 mb-6 bg-slate-100/70 p-3 rounded-lg border border-slate-200">
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={handleSaveToDatabase}
-            disabled={!dataset || isLoading || isSaving || isSaved}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 border text-xs font-semibold rounded shadow-xs transition ${
-              isSaved
-                ? "bg-emerald-50 border-emerald-200 text-emerald-700 cursor-default"
-                : "bg-white border-slate-300 text-slate-700 hover:bg-slate-50 disabled:text-slate-400 disabled:bg-white disabled:cursor-not-allowed"
-            }`}
-          >
-            {isSaving ? (
-              <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />
-                <span>Saving...</span>
-              </>
-            ) : isSaved ? (
-              <>
-                <Check className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Saved to Database</span>
-              </>
-            ) : (
-              <>
-                <Database className="w-3.5 h-3.5 text-blue-600" />
-                <span>Save to Database</span>
-              </>
-            )}
-          </button>
+          {dataset ? (
+            <>
+              <button
+                type="button"
+                onClick={handleSaveToDatabase}
+                disabled={isLoading || isSaving || isSaved}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 border text-xs font-semibold rounded shadow-xs transition ${
+                  isSaved
+                    ? "bg-emerald-50 border-emerald-200 text-emerald-700 cursor-default"
+                    : "bg-white border-slate-300 text-slate-700 hover:bg-slate-50 disabled:text-slate-400 disabled:bg-white disabled:cursor-not-allowed"
+                }`}
+              >
+                {isSaving ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />
+                    <span>Saving...</span>
+                  </>
+                ) : isSaved ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Saved to Database</span>
+                  </>
+                ) : (
+                  <>
+                    <Database className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Save to Database</span>
+                  </>
+                )}
+              </button>
 
-          <button
-            type="button"
-            onClick={handleDownloadExcel}
-            disabled={!dataset || isLoading}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-300 text-slate-700 disabled:text-slate-400 text-xs font-semibold rounded shadow-xs hover:bg-slate-50 disabled:bg-white disabled:cursor-not-allowed transition"
-          >
-            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-            <span>Download Excel</span>
-          </button>
+              <button
+                type="button"
+                onClick={handleDownloadExcel}
+                disabled={isLoading}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-300 text-slate-700 text-xs font-semibold rounded shadow-xs hover:bg-slate-50 transition"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Download Excel</span>
+              </button>
+            </>
+          ) : (
+            <span className="text-xs text-slate-400 font-medium italic">
+              Generate data below to export or save
+            </span>
+          )}
         </div>
 
         <div>
@@ -442,12 +447,12 @@ export default function Home() {
         <TableSkeleton />
       ) : dataset ? (
         <DataTable
+          key={`${dataset.query}-${dataset.rows.length}`}
           query={dataset.query}
           note={dataset.note}
           columns={dataset.columns}
           rows={dataset.rows}
           sourceBadge={sourceBadge}
-          isLoadingMore={isLoadingMore}
           targetTotal={dataset.targetTotal}
         />
       ) : (

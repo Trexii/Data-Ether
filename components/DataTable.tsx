@@ -9,7 +9,6 @@ interface DataTableProps {
   columns: string[];
   rows: Record<string, string | number>[];
   sourceBadge?: string;
-  isLoadingMore?: boolean;
   targetTotal?: number;
 }
 
@@ -21,7 +20,6 @@ export default function DataTable({
   columns,
   rows,
   sourceBadge = "Fast (model knowledge)",
-  isLoadingMore = false,
   targetTotal,
 }: DataTableProps) {
   const [filterText, setFilterText] = useState("");
@@ -83,7 +81,7 @@ export default function DataTable({
   }, [filteredRows, sortColumn, sortDirection]);
 
   return (
-    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-md animate-table-spring">
       {/* Table Header Metadata */}
       <div className="p-5 border-b border-slate-200 bg-slate-50/50">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-2">
@@ -92,12 +90,6 @@ export default function DataTable({
             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-200">
               {rows.length} {rows.length === 1 ? "row" : "rows"}
             </span>
-            {isLoadingMore && (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200 animate-pulse">
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping" />
-                Generating more rows ({rows.length}/{targetTotal || "..."})
-              </span>
-            )}
           </div>
 
           {/* Source Badge */}
@@ -182,10 +174,10 @@ export default function DataTable({
               sortedRows.map((row, index) => (
                 <tr
                   key={index}
-                  className={`animate-row-fade transition-colors duration-150 ${
-                    index % 2 === 0 ? "bg-white hover:bg-blue-50/40" : "bg-slate-50/60 hover:bg-blue-50/40"
+                  className={`animate-row-bounce row-hover-lift transition-colors duration-150 border-b border-slate-100 last:border-b-0 ${
+                    index % 2 === 0 ? "bg-white hover:bg-blue-50/50" : "bg-slate-50/60 hover:bg-blue-50/50"
                   }`}
-                  style={{ animationDelay: `${(index % 12) * 30}ms` }}
+                  style={{ animationDelay: `${Math.min(index * 35, 1400)}ms` }}
                 >
                   {columns.map((col) => (
                     <td key={col} className="py-2.5 px-4 text-slate-700 whitespace-nowrap">
@@ -194,26 +186,6 @@ export default function DataTable({
                   ))}
                 </tr>
               ))
-            )}
-
-            {/* Seamless Skeleton Shimmer Rows while generating continuation batch */}
-            {isLoadingMore && (
-              <>
-                <tr className="animate-pulse bg-slate-50/50">
-                  {columns.map((col, idx) => (
-                    <td key={idx} className="py-3 px-4">
-                      <div className="h-4 bg-slate-200/80 rounded w-4/5 animate-pulse" />
-                    </td>
-                  ))}
-                </tr>
-                <tr className="animate-pulse bg-white/70">
-                  {columns.map((col, idx) => (
-                    <td key={idx} className="py-3 px-4">
-                      <div className="h-4 bg-slate-200/60 rounded w-3/5 animate-pulse" />
-                    </td>
-                  ))}
-                </tr>
-              </>
             )}
           </tbody>
         </table>

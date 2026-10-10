@@ -10,8 +10,10 @@ Return ONLY a JSON object that matches the provided schema. No markdown, no code
 
 Rules:
 1. If the request can reasonably be represented as a table, set status to "ok". Only set status to "error" if the prompt is a conversational greeting or gibberish.
-2. columns: 2 to 10 short, human readable column names (e.g. "Rank", "Company", "Headquarters"). Put Rank first when the data is a ranking.
-3. targetTotal: determine the target number of rows requested (e.g. if request says "Top 5 ...", targetTotal is 5; if "Top 20", targetTotal is 20; if "Top 50", targetTotal is 50; if unspecified, choose 25). Cap at 50.
+2. columns: 4 to 8 short, human-readable column names matching the requested domain.
+   - For corporate/company rankings (e.g. "Fortune 500 Top 20", "biggest companies", "banks"): you MUST strictly include these standard fields: "Rank", "Company", "Industry", "Headquarters", "Revenue (USD billions)", and "CEO".
+   - For other entity requests (sports, countries, universities): select relevant, informative attributes (e.g. Rank, Name, Key Metric with unit in parentheses, Location, etc.). Put Rank first when the data is a ranking.
+3. targetTotal: determine the target number of rows requested (e.g. if request says "Top 5 ...", targetTotal is 5; if "Top 20", targetTotal is 20; if unspecified, choose 20). Cap at 50.
 4. rows: generate the FIRST BATCH of up to 15 rows (or all rows if targetTotal <= 15). Every row must contain exactly the keys listed in columns, spelled identically.
 5. hasMore: set to true if targetTotal > rows.length, otherwise false.
 6. Values are strings or numbers. Use numbers for numeric fields without currency symbols, and put unit in the column name (e.g. "Revenue (USD billions)"). Use "N/A" for unknown values. Never use null.

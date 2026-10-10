@@ -114,25 +114,25 @@ Rules:
 
 AWS Amplify Hosting enforces a hard, non-configurable **30-second gateway timeout** on Server-Side Rendering (SSR) API routes. Heavy LLM queries generating 30 full rows can take 30+ seconds, causing API Gateway to drop the connection with a `504 Gateway Timeout`.
 
-To permanently solve this, the application uses **Progressive Two-Phase Generation**:
+To permanently solve this while delivering a polished user experience, the application uses **Background Multi-Phase Generation with Animated Reveal**:
 
 1. **Phase 1: Initial Batch (`POST /api/generate`, `batch: "initial"`)**
-   - Calls Gemini to determine the column schema, analytical note, estimated total rows (`targetTotal`), and the **first 10 rows**.
-   - Finishes in **< 2 seconds**.
-   - The client immediately renders the full table structure and first 10 rows on screen.
-   - If the request only needed $\le$ 10 rows or was already cached/saved, generation concludes immediately.
+   - Calls Gemini to determine the column schema, analytical note, estimated total rows (`targetTotal`), and the **first ~15 rows**.
+   - Completes in **~1.5 to 2.5 seconds**.
+   - If the request only needed $\le$ 15 rows or was already cached/saved, generation concludes immediately.
 
 2. **Phase 2: Continuation Batch (`POST /api/generate`, `batch: "continuation"`)**
-   - Automatically triggered in the background if additional rows remain (`hasMore: true`).
+   - Automatically executed in the background if additional rows remain (`hasMore: true`).
    - Passes the established `columns` and an array of `previousItems` so the model avoids repeating entities.
-   - Generates the remaining rows (up to `targetTotal`, capped at 30) in **~2 to 4 seconds**.
+   - Generates the remaining rows (up to `targetTotal`, capped at 50) in **~2 to 3 seconds**.
    - Neither call ever approaches Amplify's 30-second ceiling.
 
-3. **Seamless Animated Rendering & Visual Feedback:**
-   - **Staggered Row Cascade:** Delivered rows animate into view with staggered CSS transitions (`animate-row-fade` with dynamic `animationDelay`).
-   - **Live Shimmer Skeletons:** While Phase 2 processes, shimmering placeholder rows render at the bottom of the table alongside an active *"Generating more rows (10/25)"* pulse badge.
-   - **Cache Merging:** When Phase 2 finishes, the complete dataset is persisted into `generation_cache` so subsequent searches return all rows in < 10ms.
-   - **Fault Tolerance:** If network connectivity drops during Phase 2, the user retains full access to Phase 1 data without error screens.
+3. **All-At-Once Spring & Elastic Bounce Table Animation:**
+   - **No Half-Loaded Tables:** Instead of showing an incomplete table that awkwardly updates midway, the application retains the clean loading skeleton during background API calls and reveals the **complete dataset all at once** when the final call finishes.
+   - **Elastic Table Spring (`animate-table-spring`):** The entire table container bursts into view with a smooth cubic-bezier spring and scale overshoot (`cubic-bezier(0.34, 1.56, 0.64, 1)`).
+   - **Staggered Domino Row Bounce (`animate-row-bounce`):** Every row pops and bounces into place one-by-one with staggered spring timing (`animationDelay: index * 35ms`).
+   - **Hover Lift (`row-hover-lift`):** Rows lift smoothly with subtle elevation and soft glow when hovered over.
+   - **Cache Merging:** When complete, the dataset is persisted into `generation_cache` so subsequent searches return all rows in < 10ms.
 
 ---
 
