@@ -28,6 +28,7 @@ export default function Home() {
   const [sourceBadge, setSourceBadge] = useState<string>("AI Generation");
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [isOptimizing, setIsOptimizing] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
 
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -89,7 +90,7 @@ export default function Home() {
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmedQuery = query.trim();
-    if (!trimmedQuery || isLoading) return;
+    if (!trimmedQuery || isLoading || isLoadingMore) return;
 
     if (trimmedQuery.length < 3) {
       setErrorMessage("Please enter at least 3 characters.");
@@ -97,18 +98,19 @@ export default function Home() {
     }
 
     setIsLoading(true);
+    setIsLoadingMore(false);
     setIsSaved(false);
     setErrorMessage("");
 
-    // Client abort controller (no artificial timeout limit)
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
     try {
+      // Step 1: Request initial batch (columns, note, and first ~10 rows in < 2s)
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: trimmedQuery }),
+        body: JSON.stringify({ query: trimmedQuery, batch: "initial" }),
         signal: controller.signal,
       });
 
@@ -124,15 +126,68 @@ export default function Home() {
       }
 
       setDataset(data);
+      setIsLoading(false); // Render table shell and initial rows immediately!
+
       if (data.fromDatabase) {
         setSourceBadge("Loaded from database");
         setIsSaved(true);
         addToast("info", "Loaded from database");
+        return;
       } else if (data.cached) {
         setSourceBadge("From cache");
-        addToast("success", "Data generated (from cache)");
+        addToast("success", "Data loaded (from cache)");
+        return;
       } else {
         setSourceBadge(data.model || "Gemini Flash");
+      }
+
+      // Step 2: If there are remaining rows, fetch continuation batch seamlessly
+      if (data.hasMore && data.rows && data.rows.length < (data.targetTotal || 25)) {
+        setIsLoadingMore(true);
+        addToast("info", `First ${data.rows.length} rows loaded. Generating remaining entries...`);
+
+        // Extract primary names from first or second column to avoid duplicates
+        const entityCol = data.columns[1] || data.columns[0];
+        const previousItems = data.rows.map((r: any) => String(r[entityCol] || Object.values(r)[0]));
+
+        try {
+          const res2 = await fetch("/api/generate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              query: trimmedQuery,
+              batch: "continuation",
+              columns: data.columns,
+              note: data.note,
+              existingRows: data.rows,
+              existingRowsCount: data.rows.length,
+              previousItems,
+              targetTotal: data.targetTotal || 25,
+            }),
+            signal: controller.signal,
+          });
+
+          if (res2.ok) {
+            const contData = await res2.json();
+            if (contData.rows && contData.rows.length > 0) {
+              setDataset((prev) => {
+                if (!prev) return prev;
+                return {
+                  ...prev,
+                  rows: [...prev.rows, ...contData.rows],
+                  hasMore: false,
+                };
+              });
+              addToast("success", `Table complete (${data.rows.length + contData.rows.length} rows)`);
+            }
+          }
+        } catch (contErr) {
+          console.warn("Continuation batch failed:", contErr);
+          // Initial rows remain available even if continuation fails
+        } finally {
+          setIsLoadingMore(false);
+        }
+      } else {
         addToast("success", "Data generated");
       }
     } catch (err: unknown) {
@@ -392,6 +447,8 @@ export default function Home() {
           columns={dataset.columns}
           rows={dataset.rows}
           sourceBadge={sourceBadge}
+          isLoadingMore={isLoadingMore}
+          targetTotal={dataset.targetTotal}
         />
       ) : (
         <main className="bg-white border border-slate-200 rounded-xl p-12 text-center shadow-sm">

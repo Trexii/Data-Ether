@@ -10,6 +10,8 @@ A production-ready full-stack web application that transforms arbitrary text req
 - **Voice Microphone Input:** Native browser speech-to-text integration (`SpeechRecognition`) enabling hands-free voice querying with real-time feedback and active listening indicators.
 - **Search Speed Optimizer:** Dedicated "Optimize Question" button that transforms wordy, conversational prompts into concise, high-speed queries. If the query is already concise, it alerts the user and keeps the input intact.
 - **Anti-Manipulation & Ranking Integrity:** Defense-in-depth shield that rejects arbitrary position manipulation (e.g. *"This object should be on the first"* or *"Put X at #1"*). The system strips manipulative instructions, preserves factual data integrity, and states in the note that custom rank manipulation is not possible.
+- **Progressive Two-Phase Generation (AWS Timeout Bypass):** Permanently bypasses AWS Amplify's 30-second gateway timeout by dividing generation into two rapid API calls. Call 1 delivers the table schema and initial rows in < 2 seconds; Call 2 seamlessly streams remaining rows in the background.
+- **Seamless Animated Row Cascade:** Newly delivered rows animate onto the screen with staggered transitions (`animate-row-fade`) while animated skeleton shimmer rows indicate live generation.
 - **Client-Side Excel Export:** Instant `.xlsx` generation using `ExcelJS` in the browser with frozen header rows, auto-filters, column auto-sizing, and an auxiliary metadata sheet. Zero server load for file conversion.
 - **PostgreSQL Persistence:** Complete datasets stored as flexible JSONB structures with zero ORM overhead via parameterized SQL on Amazon RDS.
 - **AI-Free Retrieval:** "Load Saved Data" retrieves directly from PostgreSQL, strictly bypassing the AI API to protect quota and ensure deterministic retrieval.
@@ -23,21 +25,23 @@ A production-ready full-stack web application that transforms arbitrary text req
                                     +-----------------------------------------+
                                     |        Next.js App Router (Client)      |
                                     |   - Dynamic Table (Sort, Filter, Sticky)|
+                                    |   - Staggered Row Animation & Shimmer   |
                                     |   - Excel Export (ExcelJS in browser)   |
                                     |   - Saved Datasets Modal                |
                                     +-------------------+---------------------+
                                                         |
                      +----------------------------------+----------------------------------+
                      |                                  |                                  |
-              [Data Generation]                   [Data Storage]                     [Data Retrieval]
+     [Two-Phase Generation]                       [Data Storage]                     [Data Retrieval]
                      |                                  |                                  |
                      v                                  v                                  v
 +------------------------------------------+ +------------------------+         +------------------------------+
 | POST /api/generate                       | | POST /api/datasets     |         | GET /api/datasets            |
-| - Rate limit & Daily cap check           | | - Zod validation       |         | GET /api/datasets/[id]       |
-| - Cache lookup (generation_cache)        | | - Insert into          |         | DELETE /api/datasets/[id]    |
-| - Gemini SDK (AbortController, 30s)      | |   PostgreSQL           |         | GET /api/health              |
-| - Fallback model & malformed retry       | +-----------+------------+         +--------------+---------------+
+| Phase 1: batch=initial (<2s)             | | - Zod validation       |         | GET /api/datasets/[id]       |
+|   -> Schema + first 10 rows              | | - Insert into          |         | DELETE /api/datasets/[id]    |
+| Phase 2: batch=continuation (~3s)        | |   PostgreSQL           |         | GET /api/health              |
+|   -> Non-duplicating remaining rows      | +-----------+------------+         +--------------+---------------+
+| - Cache lookup & rate limit              |             |                                     |
 +--------------------+---------------------+             |                                     |
                      |                                 |                                   |
                      +---------------------------------+-----------------------------------+
@@ -106,12 +110,29 @@ Rules:
 
 ---
 
-## 5. Time Budget & Cost Protection
+## 5. Progressive Two-Phase Generation & AWS Gateway Timeout Protection
 
-1. **Server Budget:** The route establishes a strict 30-second budget (`AI_TIME_BUDGET_MS = 30000`).
-2. **AbortController:** Every Gemini call uses an `AbortController` set to remaining budget minus 1,000ms. If aborted, it cleanly returns HTTP 504 `AI_TIMEOUT`.
-3. **Conditional Retry / Fallback:** A malformed response retry or fallback model switch triggers if $\ge$ 6 seconds remain in the budget.
-4. **Client-Side Timeout:** The browser aborts fetch after 34 seconds defensively, displaying a friendly prompt rather than freezing the UI.
+AWS Amplify Hosting enforces a hard, non-configurable **30-second gateway timeout** on Server-Side Rendering (SSR) API routes. Heavy LLM queries generating 30 full rows can take 30+ seconds, causing API Gateway to drop the connection with a `504 Gateway Timeout`.
+
+To permanently solve this, the application uses **Progressive Two-Phase Generation**:
+
+1. **Phase 1: Initial Batch (`POST /api/generate`, `batch: "initial"`)**
+   - Calls Gemini to determine the column schema, analytical note, estimated total rows (`targetTotal`), and the **first 10 rows**.
+   - Finishes in **< 2 seconds**.
+   - The client immediately renders the full table structure and first 10 rows on screen.
+   - If the request only needed $\le$ 10 rows or was already cached/saved, generation concludes immediately.
+
+2. **Phase 2: Continuation Batch (`POST /api/generate`, `batch: "continuation"`)**
+   - Automatically triggered in the background if additional rows remain (`hasMore: true`).
+   - Passes the established `columns` and an array of `previousItems` so the model avoids repeating entities.
+   - Generates the remaining rows (up to `targetTotal`, capped at 30) in **~2 to 4 seconds**.
+   - Neither call ever approaches Amplify's 30-second ceiling.
+
+3. **Seamless Animated Rendering & Visual Feedback:**
+   - **Staggered Row Cascade:** Delivered rows animate into view with staggered CSS transitions (`animate-row-fade` with dynamic `animationDelay`).
+   - **Live Shimmer Skeletons:** While Phase 2 processes, shimmering placeholder rows render at the bottom of the table alongside an active *"Generating more rows (10/25)"* pulse badge.
+   - **Cache Merging:** When Phase 2 finishes, the complete dataset is persisted into `generation_cache` so subsequent searches return all rows in < 10ms.
+   - **Fault Tolerance:** If network connectivity drops during Phase 2, the user retains full access to Phase 1 data without error screens.
 
 ---
 

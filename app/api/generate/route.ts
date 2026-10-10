@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateRequestSchema } from "@/lib/schema";
-import { generateTableData, AiError } from "@/lib/ai";
+import { generateInitialTableData, generateContinuationRows, AiError } from "@/lib/ai";
 import { checkIpRateLimit, checkDailyAiCap } from "@/lib/rateLimit";
 import { getCachedGeneration, setCachedGeneration, normalizeCacheKey } from "@/lib/cache";
 import { query } from "@/lib/db";
@@ -19,7 +19,63 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { query: userQuery } = parseResult.data;
+    const {
+      query: userQuery,
+      batch = "initial",
+      columns = [],
+      note = "",
+      existingRows = [],
+      existingRowsCount = 0,
+      previousItems = [],
+      targetTotal = 25,
+    } = parseResult.data;
+
+    // Handle continuation batch
+    if (batch === "continuation") {
+      if (!columns || columns.length === 0) {
+        return NextResponse.json(
+          { error: { code: "INVALID_INPUT", message: "Columns must be provided for continuation batch." } },
+          { status: 400 }
+        );
+      }
+
+      const { rows: continuationRows, modelUsed } = await generateContinuationRows(
+        userQuery,
+        columns,
+        existingRowsCount || (existingRows ? existingRows.length : 0),
+        previousItems,
+        targetTotal
+      );
+
+      // Save complete merged dataset into cache
+      if (existingRows && existingRows.length > 0) {
+        try {
+          const cacheKey = normalizeCacheKey(userQuery);
+          const fullRows = [...existingRows, ...continuationRows];
+          await setCachedGeneration(cacheKey, {
+            query: userQuery,
+            note: note || "",
+            columns,
+            rows: fullRows,
+            model: modelUsed,
+            cached: true,
+            fromDatabase: false,
+            hasMore: false,
+            targetTotal: fullRows.length,
+          });
+        } catch (cacheErr) {
+          console.warn("Failed to update cache on continuation:", cacheErr);
+        }
+      }
+
+      return NextResponse.json({
+        rows: continuationRows,
+        model: modelUsed,
+        hasMore: false,
+      });
+    }
+
+    // --- INITIAL BATCH FLOW ---
 
     // 2. Check if this exact dataset is already saved in the database
     try {
@@ -42,10 +98,10 @@ export async function POST(req: NextRequest) {
           model: row.model,
           cached: true,
           fromDatabase: true,
+          hasMore: false,
         });
       }
     } catch (err) {
-      // If DB check fails, proceed to cache / AI check
       console.warn("Database check skipped:", err);
     }
 
@@ -71,7 +127,10 @@ export async function POST(req: NextRequest) {
     const cachedResult = await getCachedGeneration(cacheKey);
 
     if (cachedResult) {
-      return NextResponse.json(cachedResult);
+      return NextResponse.json({
+        ...cachedResult,
+        hasMore: false,
+      });
     }
 
     // 5. Check Daily Global AI Cap
@@ -88,21 +147,25 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 6. Call AI generation service
-    const { data, modelUsed } = await generateTableData(userQuery);
+    // 6. Call AI initial generation (fast schema + first batch in ~2s)
+    const { data, modelUsed } = await generateInitialTableData(userQuery);
 
     const resultPayload = {
       query: userQuery,
       note: data.note,
       columns: data.columns,
       rows: data.rows,
+      targetTotal: data.targetTotal,
+      hasMore: data.hasMore,
       model: modelUsed,
       cached: false,
       fromDatabase: false,
     };
 
-    // 7. Save successful generation into Cache
-    await setCachedGeneration(cacheKey, resultPayload);
+    // If all rows were generated in batch 1, cache immediately
+    if (!data.hasMore) {
+      await setCachedGeneration(cacheKey, resultPayload);
+    }
 
     return NextResponse.json(resultPayload);
   } catch (error: unknown) {
