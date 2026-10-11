@@ -10,7 +10,6 @@ interface DataTableProps {
   columns: string[];
   rows: Record<string, string | number>[];
   sourceBadge?: string;
-  targetTotal?: number;
   onSaveToDatabase?: () => void;
   isSaving?: boolean;
   isSaved?: boolean;
@@ -26,7 +25,6 @@ export default function DataTable({
   columns,
   rows,
   sourceBadge = "Fast (model knowledge)",
-  targetTotal,
   onSaveToDatabase,
   isSaving,
   isSaved,

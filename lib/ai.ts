@@ -273,12 +273,6 @@ Task: Generate entries from #${existingRowsCount + 1} up to #${targetTotal}. Eve
   return { rows: sanitizedRows, modelUsed };
 }
 
-/**
- * Standard table generator (backward-compatible).
- */
-export async function generateTableData(query: string): Promise<{ data: AIResponse; modelUsed: string }> {
-  return generateInitialTableData(query);
-}
 
 const OPTIMIZER_SYSTEM_INSTRUCTION = `You are an AI search query optimizer for a high-performance tabular data engine.
 Rules:

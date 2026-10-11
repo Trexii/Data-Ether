@@ -34,8 +34,6 @@ export default function ScrambleCell({
     let isMounted = true;
 
     timerRef.current = setTimeout(() => {
-      let iteration = 0;
-      const maxIterations = Math.min(targetText.length * 3, 18);
       const startTime = performance.now();
       const duration = 280; // ms for scramble
 

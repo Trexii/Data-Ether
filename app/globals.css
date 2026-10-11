@@ -15,21 +15,6 @@ body {
   overflow-x: hidden;
 }
 
-@keyframes tableSensibleFadeRise {
-  0% {
-    opacity: 0;
-    transform: translateY(16px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.animate-table-arrival {
-  animation: tableSensibleFadeRise 0.5s ease-out forwards;
-}
-
 @keyframes rowSensibleFadeIn {
   0% {
     opacity: 0;
@@ -43,39 +28,6 @@ body {
 
 .animate-row-sensible {
   animation: rowSensibleFadeIn 0.3s ease-out both;
-}
-
-@keyframes rowBounceIn {
-  0% {
-    opacity: 0;
-    transform: translateY(24px) scale(0.95);
-  }
-  65% {
-    opacity: 1;
-    transform: translateY(-4px) scale(1.012);
-  }
-  85% {
-    transform: translateY(1.5px) scale(0.998);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-.animate-row-bounce {
-  animation: rowBounceIn 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
-}
-
-.row-hover-lift {
-  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.15s ease, box-shadow 0.18s ease;
-}
-
-.row-hover-lift:hover {
-  transform: scale(1.002) translateY(-1px);
-  box-shadow: 0 4px 14px -2px rgba(37, 99, 235, 0.12);
-  position: relative;
-  z-index: 5;
 }
 
 @keyframes shutterFlash {
@@ -110,19 +62,6 @@ body {
   animation: lensFlare 0.45s ease-out forwards;
 }
 
-@keyframes pulseGlow {
-  0%, 100% {
-    box-shadow: 0 0 15px rgba(139, 92, 246, 0.25), inset 0 0 15px rgba(139, 92, 246, 0.15);
-  }
-  50% {
-    box-shadow: 0 0 30px rgba(56, 189, 248, 0.4), inset 0 0 25px rgba(56, 189, 248, 0.25);
-  }
-}
-
-.animate-pulse-glow {
-  animation: pulseGlow 2.8s ease-in-out infinite;
-}
-
 /* Custom Astral Obsidian Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
@@ -146,4 +85,22 @@ body {
 * {
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.2) rgba(0, 0, 0, 0.45);
+}
+
+/* Minimal High-Contrast Themed Arrow Cursor */
+:root {
+  --cursor-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M3 2L3 19L7.5 14.5L11.5 21.5L14 20L10 13L17 13L3 2Z' fill='%23FFFFFF' stroke='%2300F0FF' stroke-width='1.5' stroke-linejoin='round'/%3E%3C/svg%3E") 3 2, auto;
+  --cursor-pointer: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M3 2L3 19L7.5 14.5L11.5 21.5L14 20L10 13L17 13L3 2Z' fill='%2300F0FF' stroke='%23FFFFFF' stroke-width='1.5' stroke-linejoin='round'/%3E%3C/svg%3E") 3 2, pointer;
+}
+
+body {
+  cursor: var(--cursor-arrow);
+}
+
+button, a, [role="button"], .cursor-pointer {
+  cursor: var(--cursor-pointer);
+}
+
+input, textarea, [contenteditable="true"] {
+  cursor: text;
 }

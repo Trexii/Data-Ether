@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { FileSpreadsheet, Loader2, Check, ArrowLeft } from "lucide-react";
+import { Loader2, ArrowLeft } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toPng } from "html-to-image";
 import DataTable from "@/components/DataTable";
@@ -746,7 +746,6 @@ export default function Home() {
               columns={dataset.columns}
               rows={dataset.rows}
               sourceBadge={sourceBadge}
-              targetTotal={dataset.targetTotal}
               onSaveToDatabase={handleSaveToDatabase}
               isSaving={isSaving}
               isSaved={isSaved}
