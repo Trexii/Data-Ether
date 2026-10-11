@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { Loader2, ArrowLeft } from "lucide-react";
+import { Loader2, ArrowLeft, Sparkles, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toPng } from "html-to-image";
 import DataTable from "@/components/DataTable";
@@ -34,6 +34,7 @@ export default function Home() {
   const [sourceBadge, setSourceBadge] = useState<string>("AI Generation");
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [isOptimizing, setIsOptimizing] = useState(false);
+  const [dismissedLongPromptTip, setDismissedLongPromptTip] = useState(false);
 
   // Snapshot & Warp States
   const [shutterFlash, setShutterFlash] = useState(false);
@@ -64,6 +65,10 @@ export default function Home() {
     const val = e.target.value.slice(0, 200);
     setQuery(val);
 
+    if (val.trim().length < 50) {
+      setDismissedLongPromptTip(false);
+    }
+
     // Track typing speed for reactive starfield ripples & hue shifting
     const now = Date.now();
     setKeystrokeTime(now);
@@ -85,6 +90,7 @@ export default function Home() {
   const handleSelectExample = (example: string) => {
     setQuery(example);
     setErrorMessage("");
+    setDismissedLongPromptTip(false);
   };
 
   const handleOptimizeQuery = async () => {
@@ -115,21 +121,26 @@ export default function Home() {
         addToast("info", "Query is already concise and search-optimized!");
       } else if (data.optimizedQuery) {
         setQuery(data.optimizedQuery);
+        setDismissedLongPromptTip(false);
         addToast("success", `Question optimized for fast search: "${data.optimizedQuery}"`);
       }
     } catch (err: unknown) {
       if (err instanceof Error) {
-        addToast("error", err.message);
+        let msg = err.message;
+        if (msg.toLowerCase().includes("timeout") || msg.toLowerCase().includes("timed out") || msg.toLowerCase().includes("fetch")) {
+          msg = "Optimization timed out. Please retry again after a while.";
+        }
+        addToast("error", msg);
       } else {
-        addToast("error", "Failed to optimize question.");
+        addToast("error", "Failed to optimize question. Please retry again after a while.");
       }
     } finally {
       setIsOptimizing(false);
     }
   };
 
-  const handleGenerate = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleGenerate = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     const trimmedQuery = query.trim();
     if (!trimmedQuery || isLoading) return;
 
@@ -150,22 +161,44 @@ export default function Home() {
     try {
       // Step 1: Request initial batch (columns, note, and first ~15 rows)
       setLoadingPhase("schema");
-      const res = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: trimmedQuery, batch: "initial" }),
-        signal: controller.signal,
-      });
+      let res: Response;
+      try {
+        res = await fetch("/api/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: trimmedQuery, batch: "initial" }),
+          signal: controller.signal,
+        });
+      } catch (fetchErr: unknown) {
+        if (controller.signal.aborted) {
+          throw new Error("Generation was cancelled.");
+        }
+        throw new Error("Server timed out or network connection lost. Please retry again after a while.");
+      }
 
-      let data: any;
+      let data: (GenerateResult & { error?: { message?: string } }) | null = null;
       try {
         data = await res.json();
       } catch {
-        throw new Error("Unable to parse server response. The gateway may have timed out.");
+        throw new Error("Server timed out while parsing response. Please retry again after a while.");
       }
 
-      if (!res.ok) {
-        throw new Error(data?.error?.message || "Failed to generate data.");
+      if (!res.ok || !data) {
+        let msg = data?.error?.message || "Failed to generate data.";
+        if (
+          res.status === 504 ||
+          res.status === 408 ||
+          res.status === 502 ||
+          res.status === 503 ||
+          msg.toLowerCase().includes("timed out") ||
+          msg.toLowerCase().includes("timeout") ||
+          msg.toLowerCase().includes("busy")
+        ) {
+          if (!msg.toLowerCase().includes("retry again")) {
+            msg = `${msg.replace(/\.$/, "")}. Please retry again after a while.`;
+          }
+        }
+        throw new Error(msg);
       }
 
       if (data.fromDatabase) {
@@ -196,7 +229,7 @@ export default function Home() {
         setLoadingPhase("continuation");
         // Extract primary names from first or second column to avoid duplicates
         const entityCol = data.columns[1] || data.columns[0];
-        const previousItems = data.rows.map((r: any) => String(r[entityCol] || Object.values(r)[0]));
+        const previousItems = data.rows.map((r) => String(r[entityCol] || Object.values(r)[0]));
 
         try {
           const res2 = await fetch("/api/generate", {
@@ -246,9 +279,20 @@ export default function Home() {
       if (controller.signal.aborted) {
         setErrorMessage("Generation was cancelled.");
       } else if (err instanceof Error) {
-        setErrorMessage(err.message);
+        let msg = err.message;
+        if (
+          msg.toLowerCase().includes("timeout") ||
+          msg.toLowerCase().includes("timed out") ||
+          msg.toLowerCase().includes("fetch") ||
+          msg.toLowerCase().includes("network")
+        ) {
+          if (!msg.toLowerCase().includes("retry again")) {
+            msg = "Server timed out. Please retry again after a while.";
+          }
+        }
+        setErrorMessage(msg);
       } else {
-        setErrorMessage("An unexpected error occurred.");
+        setErrorMessage("Server timed out or encountered an issue. Please retry again after a while.");
       }
     } finally {
       setIsLoading(false);
@@ -566,7 +610,14 @@ export default function Home() {
         dataset ? "max-w-[98vw] xl:max-w-[1650px]" : "max-w-6xl"
       }`}>
         {/* Error Banner */}
-        <ErrorBanner message={errorMessage} onDismiss={() => setErrorMessage("")} />
+        <ErrorBanner
+          message={errorMessage}
+          onDismiss={() => setErrorMessage("")}
+          onRetry={() => {
+            setErrorMessage("");
+            handleGenerate();
+          }}
+        />
 
         {/* Multi-Stage Choreographed Transitions */}
         <AnimatePresence mode="wait">
@@ -616,6 +667,42 @@ export default function Home() {
 
               {/* Liquid Glossy Glassmorphism Input Bar */}
               <form onSubmit={handleGenerate} className="w-full relative z-10">
+                {/* Floating Long-Query Optimization Popup Pill */}
+                <AnimatePresence>
+                  {query.trim().length >= 55 && !dismissedLongPromptTip && !isLoading && !isOptimizing && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 8, scale: 0.95 }}
+                      transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                      className="absolute -top-11 sm:-top-12 inset-x-0 mx-auto w-fit max-w-[95%] sm:max-w-md z-30 pointer-events-auto"
+                    >
+                      <div className="flex items-center gap-2 sm:gap-2.5 px-3 sm:px-3.5 py-1.5 rounded-full backdrop-blur-2xl bg-[#09090b]/95 border border-white/20 border-t-white/40 shadow-[0_12px_35px_rgba(0,0,0,0.85),inset_0_1px_1px_rgba(255,255,255,0.25)] text-zinc-200">
+                        <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0 animate-pulse" />
+                        <span className="text-[11px] sm:text-xs font-sans text-zinc-300">
+                          Long prompt detected — optimize for faster search?
+                        </span>
+                        <button
+                          type="button"
+                          onClick={handleOptimizeQuery}
+                          disabled={isOptimizing}
+                          className="px-2.5 py-0.5 rounded-full bg-white/[0.12] hover:bg-white/25 border border-white/25 text-[10px] font-mono uppercase tracking-wider text-white transition active:scale-95 shrink-0 flex items-center gap-1 shadow-xs"
+                        >
+                          {isOptimizing ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : "Optimize"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDismissedLongPromptTip(true)}
+                          className="text-zinc-400 hover:text-white p-0.5 transition shrink-0 ml-0.5"
+                          aria-label="Dismiss optimization tip"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
                 <div className="relative group w-full rounded-2xl backdrop-blur-2xl bg-white/[0.05] border border-white/20 border-t-white/40 border-l-white/25 focus-within:border-white/50 focus-within:ring-1 focus-within:ring-white/30 shadow-[inset_0_1px_1px_rgba(255,255,255,0.35),inset_0_0_20px_rgba(255,255,255,0.02),0_20px_50px_rgba(0,0,0,0.85)] transition-all duration-300 overflow-hidden">
                   {/* Liquid Glass Specular Top Sheen */}
                   <div className="absolute inset-x-0 top-0 h-[45%] bg-gradient-to-b from-white/[0.1] to-transparent pointer-events-none rounded-t-2xl" />

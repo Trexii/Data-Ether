@@ -94,9 +94,13 @@ export async function POST(req: NextRequest) {
         const parsedRows = typeof row.rows === "string" ? JSON.parse(row.rows) : row.rows;
         const cleanRows = sanitizeTableRows(parsedCols, parsedRows);
 
+        const dbNote = row.note?.trim()
+          ? row.note
+          : `Interpreted as structured comparison dataset for '${row.query}', organized by consensus ranking.`;
+
         return NextResponse.json({
           query: row.query,
-          note: row.note,
+          note: dbNote,
           columns: parsedCols,
           rows: cleanRows,
           model: row.model,
@@ -131,8 +135,13 @@ export async function POST(req: NextRequest) {
     const cachedResult = await getCachedGeneration(cacheKey);
 
     if (cachedResult) {
+      const cacheNote = cachedResult.note?.trim()
+        ? cachedResult.note
+        : `Interpreted as structured comparison dataset for '${userQuery}', organized by consensus ranking.`;
+
       return NextResponse.json({
         ...cachedResult,
+        note: cacheNote,
         rows: sanitizeTableRows(cachedResult.columns, cachedResult.rows),
         hasMore: false,
       });
@@ -186,7 +195,7 @@ export async function POST(req: NextRequest) {
       {
         error: {
           code: "SERVER_ERROR",
-          message: "An unexpected error occurred while generating data.",
+          message: "Server timed out or encountered an issue. Please retry again after a while.",
         },
       },
       { status: 500 }

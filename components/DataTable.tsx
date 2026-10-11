@@ -148,7 +148,7 @@ export default function DataTable({
               <ShieldAlert className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
             )}
             <p className="leading-snug break-words">
-              <span className="font-semibold text-white">Observation: </span>
+              <span className="font-semibold text-white">Note: </span>
               {note.replace(/^(?:Note:\s*)+/i, "")}
             </p>
           </div>

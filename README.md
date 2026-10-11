@@ -16,7 +16,6 @@
 8. [Local Development Setup](#8-local-development-setup)
 9. [AWS RDS PostgreSQL Setup Guide (New AWS Account)](#9-aws-rds-postgresql-setup-guide-new-aws-account)
 10. [AWS Amplify Deployment](#10-aws-amplify-deployment)
-11. [Interview Walkthrough & Key Talking Points](#11-interview-walkthrough--key-talking-points)
 
 ---
 
@@ -49,7 +48,7 @@
 ### 🛡️ Anti-Manipulation & Ranking Integrity Guard
 - **Deterministic Sanitization:** Regex-based pre-flight filter strips prompt commands attempting to bias rankings.
 - **Model Guardrails:** Explicit system instructions enforce objective consensus rankings.
-- **Transparent Observation Notice:** Informs the user when custom rank manipulation is rejected while preserving factual data.
+- **Transparent Note & Integrity Notice:** Informs the user when custom rank manipulation is rejected while preserving factual data.
 - **Sequential Rank Sanitizer:** Server and client verify that `Rank` columns are strictly consecutive positive integers, preventing model year hallucinations (*e.g., 2019 placed into Rank*).
 
 ### ⚡ Query Optimizer (`POST /api/optimize-query`)
@@ -112,7 +111,7 @@ AWS Amplify Hosting and AWS API Gateway enforce a strict, non-configurable **30-
 
 ### The Solution: Background Two-Phase Progressive Batching
 1. **Initial Batch (`batch: "initial"`):**
-   - The server calls Gemini to determine column definitions, observation notes, and the first 10–15 rows.
+   - The server calls Gemini to determine column definitions, context notes (`Note:`), and the first 10–15 rows.
    - Completes in **~1.5 to 2.2 seconds**, well below the 30-second ceiling.
 2. **Continuation Batch (`batch: "continuation"`):**
    - Triggered automatically in the background by the client if more rows are needed (`hasMore: true`).
@@ -333,27 +332,6 @@ Once the database status is **Available** (takes ~5–8 minutes):
    - `DAILY_AI_CAP`: `150`
    - `CACHE_TTL_HOURS`: `6`
 6. Click **Save and deploy**. Amplify will build and host the application with full SSR App Router support.
-
----
-
-## 11. Interview Walkthrough & Key Talking Points
-
-Use these concise points when demonstrating the project to Azist evaluators:
-
-1. **High-Level Overview:**
-   > *"I engineered a full-stack Next.js 16 web application that extracts structured, sortable data tables from natural language prompts using Gemini AI, with client-side Excel export, Amazon RDS persistence, and an obsidian glass aesthetic designed for both desktop and mobile devices."*
-
-2. **Solving the 30-Second Gateway Timeout:**
-   > *"AWS Amplify Hosting has a strict 30-second API Gateway ceiling. A single LLM call for 30+ rows often risks timeout. I designed a background Two-Phase Batching architecture: Phase 1 returns the schema and first batch in < 2 seconds, while Phase 2 fetches remaining rows in the background. Gateway timeouts are 100% eliminated, and the user experiences an ultra-smooth 5-phase progressive reveal."*
-
-3. **In-Browser Client-Side Excel Generation:**
-   > *"Instead of generating Excel files on the server (which burns CPU and serverless memory), I dynamically import `ExcelJS` in the browser. It builds a styled, two-sheet workbook with auto-filters and frozen headers directly from client state."*
-
-4. **Data Integrity & Security:**
-   > *"I built multi-layered guardrails: regex pre-filtering strips positional manipulation attempts ('put X at #1'), the system prompt enforces objective consensus, and server-side row sanitization prevents model year hallucinations in Rank columns."*
-
-5. **Clean Code & Maintainability:**
-   > *"The project adheres to clean code principles: modular utilities in `lib/`, shared runtime schemas via Zod, connection-drop auto-retry on PostgreSQL queries, zero unused dead code, and full TypeScript build verification."*
 
 ---
 

@@ -30,15 +30,15 @@ function ToastItem({ toast, onDismiss }: { toast: ToastMessage; onDismiss: () =>
   const onDismissRef = useRef(onDismiss);
   onDismissRef.current = onDismiss;
 
-  // Independent lifecycle timer per toast notification
+  const isError = toast.type === "error";
+
+  // Give error toasts longer reading duration (4800ms vs 3400ms)
   useEffect(() => {
     const timer = setTimeout(() => {
       onDismissRef.current();
-    }, 3200);
+    }, isError ? 4800 : 3400);
     return () => clearTimeout(timer);
-  }, []);
-
-  const isError = toast.type === "error";
+  }, [isError]);
 
   return (
     <motion.div
@@ -47,17 +47,30 @@ function ToastItem({ toast, onDismiss }: { toast: ToastMessage; onDismiss: () =>
       animate={{ opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
       exit={{ opacity: 0, y: 10, scale: 0.96, filter: "blur(6px)" }}
       transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
-      className={`pointer-events-auto relative overflow-hidden px-6 py-2.5 rounded-full border backdrop-blur-2xl shadow-[0_20px_45px_rgba(0,0,0,0.95),inset_0_1px_1px_rgba(255,255,255,0.25)] select-none flex items-center justify-center whitespace-nowrap min-h-[38px] ${
+      className={`pointer-events-auto relative overflow-hidden px-5 py-2 rounded-full border backdrop-blur-2xl shadow-[0_20px_45px_rgba(0,0,0,0.95),inset_0_1px_1px_rgba(255,255,255,0.22)] select-none flex items-center justify-center gap-2 whitespace-nowrap min-h-[36px] ${
         isError
-          ? "bg-[#09090b]/95 border-red-500/40 border-t-red-400/60 text-red-200"
+          ? "bg-[#0c0607]/95 border-red-500/35 border-t-red-400/60 text-red-200"
           : "bg-[#09090b]/92 border-white/15 border-t-white/35 text-zinc-100"
       }`}
     >
       {/* Specular Liquid Glare Bar */}
-      <div className="absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-white/45 to-transparent pointer-events-none" />
+      <div
+        className={`absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent ${
+          isError ? "via-red-400/45" : "via-white/45"
+        } to-transparent pointer-events-none`}
+      />
 
-      {/* Pure Text Toast with Generous Breathing Room */}
-      <span className="font-mono text-xs font-semibold tracking-[0.16em] uppercase text-zinc-100 drop-shadow-sm">
+      {/* Tiny Status Indicator Dot */}
+      <div
+        className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+          isError
+            ? "bg-red-400 shadow-[0_0_6px_rgba(248,113,113,0.8)]"
+            : "bg-white shadow-[0_0_6px_rgba(255,255,255,0.8)]"
+        }`}
+      />
+
+      {/* Pure Text Toast with High Typography Clarity */}
+      <span className="font-mono text-[11px] sm:text-xs font-semibold tracking-[0.14em] uppercase text-zinc-100 drop-shadow-sm">
         {toast.message}
       </span>
     </motion.div>
