@@ -204,10 +204,10 @@ export default function Home() {
       if (data.fromDatabase) {
         setLoadingPhase("finalizing");
         await new Promise((resolve) => setTimeout(resolve, 420));
-        setSourceBadge("Loaded from database");
+        setSourceBadge("The Vault");
         setIsSaved(true);
         setDataset(data);
-        addToast("info", "Loaded from database");
+        addToast("info", "Loaded from the vault");
         return;
       } else if (data.cached) {
         setLoadingPhase("finalizing");
@@ -351,7 +351,7 @@ export default function Home() {
       setIsSaving(false);
       if (result.success) {
         setIsSaved(true);
-        addToast("success", "Committed to Nexus database");
+        addToast("success", "Saved to the vault");
       } else {
         setIsSaved(false);
         addToast("error", result.errorMsg || "Could not reach database. Please retry.");
@@ -395,7 +395,7 @@ export default function Home() {
       setIsSaved(true);
       setIsVaultPulsing(true);
       setTimeout(() => setIsVaultPulsing(false), 900);
-      addToast("success", "Committed to Nexus database");
+      addToast("success", "Saved to the vault");
     } else {
       // Do NOT tick the save button on failure - leave as save icon so user can retry!
       setIsSaved(false);
@@ -507,9 +507,9 @@ export default function Home() {
   const handleLoadSavedDataset = (loadedDataset: GenerateResult) => {
     setDataset(loadedDataset);
     setQuery(loadedDataset.query);
-    setSourceBadge("Loaded from database");
+    setSourceBadge("The Vault");
     setIsSaved(true);
-    addToast("info", "Loaded saved dataset");
+    addToast("info", "Loaded from the vault");
   };
 
   return (
